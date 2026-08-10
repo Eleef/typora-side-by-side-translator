@@ -55,7 +55,7 @@ test("Windows installer gates installation on community market health and enable
   assert.match(installer, /Mode\s*=\s*"Installed"/);
   assert.match(installer, /NotePropertyValue\s+\$true/);
   assert.match(installer, /Typora is open\. Close Typora/);
-  assert.match(installer, /Get-FileHash/);
+  assert.match(installer, /Security\.Cryptography\.SHA256/);
   assert.match(installer, /\$pluginId\.installing/);
   assert.match(installer, /PackagePath/);
   assert.match(installer, /ExpectedSha256/);

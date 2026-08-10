@@ -17,6 +17,19 @@ function Invoke-Doctor {
   return $doctorExitCode
 }
 
+function Get-Sha256 {
+  param ([string] $Path)
+  $stream = [IO.File]::OpenRead([IO.Path]::GetFullPath($Path))
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+  }
+  finally {
+    $hasher.Dispose()
+    $stream.Dispose()
+  }
+}
+
 try {
   New-Item -ItemType Directory -Force (Split-Path $windowHtml -Parent) | Out-Null
   New-Item -ItemType Directory -Force (Join-Path $communityRoot "2.9.14") | Out-Null
@@ -53,7 +66,7 @@ try {
   if (-not (Test-Path -LiteralPath $releaseZip -PathType Leaf)) {
     throw "Release package is required for ZIP installer smoke: $releaseZip"
   }
-  $releaseHash = (Get-FileHash -LiteralPath $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+  $releaseHash = Get-Sha256 $releaseZip
   try {
     & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 ("0" * 64)
     throw "Installer unexpectedly accepted an incorrect package checksum."

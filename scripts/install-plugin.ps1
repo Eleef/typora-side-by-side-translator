@@ -22,6 +22,19 @@ $staging = [IO.Path]::GetFullPath((Join-Path $pluginsRoot "$pluginId.installing"
 $doctor = Join-Path $PSScriptRoot "doctor.ps1"
 $packageFiles = @("manifest.json", "main.js", "style.css")
 
+function Get-Sha256 {
+  param ([string] $Path)
+  $stream = [IO.File]::OpenRead([IO.Path]::GetFullPath($Path))
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+  }
+  finally {
+    $hasher.Dispose()
+    $stream.Dispose()
+  }
+}
+
 try {
 if ($PackagePath) {
   $resolvedPackagePath = [IO.Path]::GetFullPath($PackagePath)
@@ -31,7 +44,7 @@ if ($PackagePath) {
   if ([IO.Path]::GetExtension($resolvedPackagePath) -ne ".zip") {
     throw "Plugin package must be a ZIP file: $resolvedPackagePath"
   }
-  $actualSha256 = (Get-FileHash -LiteralPath $resolvedPackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $actualSha256 = Get-Sha256 $resolvedPackagePath
   if ($ExpectedSha256) {
     $normalizedExpectedSha256 = $ExpectedSha256.Trim().ToLowerInvariant()
     if ($normalizedExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -105,8 +118,8 @@ New-Item -ItemType Directory -Force $staging | Out-Null
 Copy-Item -Path (Join-Path $source "*") -Destination $staging -Recurse -Force
 
 foreach ($packageFile in $packageFiles) {
-  $sourceHash = (Get-FileHash (Join-Path $source $packageFile) -Algorithm SHA256).Hash
-  $stagedHash = (Get-FileHash (Join-Path $staging $packageFile) -Algorithm SHA256).Hash
+  $sourceHash = Get-Sha256 (Join-Path $source $packageFile)
+  $stagedHash = Get-Sha256 (Join-Path $staging $packageFile)
   if ($sourceHash -ne $stagedHash) {
     throw "Staged plugin file hash mismatch: $packageFile"
   }
