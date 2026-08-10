@@ -21,6 +21,7 @@ $target = [IO.Path]::GetFullPath((Join-Path $pluginsRoot $pluginId))
 $staging = [IO.Path]::GetFullPath((Join-Path $pluginsRoot "$pluginId.installing"))
 $doctor = Join-Path $PSScriptRoot "doctor.ps1"
 $packageFiles = @("manifest.json", "main.js", "style.css")
+$windowsPowerShell = (Get-Command powershell.exe -ErrorAction Stop).Source
 
 function Get-Sha256 {
   param ([string] $Path)
@@ -33,6 +34,15 @@ function Get-Sha256 {
     $hasher.Dispose()
     $stream.Dispose()
   }
+}
+
+function Invoke-Doctor {
+  param ([string] $Mode)
+  $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $doctor, "-Mode", $Mode)
+  if ($TyporaHome) { $arguments += @("-TyporaHome", $TyporaHome) }
+  if ($CommunityRoot) { $arguments += @("-CommunityRoot", $CommunityRoot) }
+  & $windowsPowerShell @arguments | Out-Host
+  return $LASTEXITCODE
 }
 
 try {
@@ -67,11 +77,8 @@ if ($runningWindow) {
   throw "Typora is open. Close Typora before installing the plugin."
 }
 
-$doctorParameters = @{ Mode = "Community" }
-if ($TyporaHome) { $doctorParameters.TyporaHome = $TyporaHome }
-if ($CommunityRoot) { $doctorParameters.CommunityRoot = $CommunityRoot }
-& $doctor @doctorParameters
-if ($LASTEXITCODE -ne 0) {
+$communityDoctorExitCode = Invoke-Doctor "Community"
+if ($communityDoctorExitCode -ne 0) {
   throw "Community plugin market check failed. Repair typora-community-plugin before installing this plugin."
 }
 
@@ -169,11 +176,8 @@ $utf8WithoutBom = [Text.UTF8Encoding]::new($false)
 Write-Output "enabled_plugin_id=$pluginId"
 Write-Output "normalized_plugin_state_encoding=$pluginStatesPath"
 
-$installedDoctorParameters = @{ Mode = "Installed" }
-if ($TyporaHome) { $installedDoctorParameters.TyporaHome = $TyporaHome }
-if ($CommunityRoot) { $installedDoctorParameters.CommunityRoot = $CommunityRoot }
-& $doctor @installedDoctorParameters
-if ($LASTEXITCODE -ne 0) {
+$installedDoctorExitCode = Invoke-Doctor "Installed"
+if ($installedDoctorExitCode -ne 0) {
   throw "Installed plugin verification failed. Review the FAIL lines above."
 }
 

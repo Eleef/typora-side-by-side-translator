@@ -8,7 +8,7 @@ Edit the original Markdown in Typora while reading a generated Simplified Chines
 
 > **Alpha:** the core workflow is working on the verified Windows setup below. The plugin is not yet available in the community marketplace and has not completed external user testing.
 
-Current development version: **`0.1.0-alpha.1`**. The installed version is also shown at the top of the plugin settings page.
+Current development version: **`0.1.0-alpha.2`**. The installed version is also shown at the top of the plugin settings page.
 
 ## Why This Plugin
 
@@ -34,7 +34,7 @@ The manifest minimums are Typora `1.12.4` and community core `2.5.28`, but those
 
 ### Install Alpha Release
 
-Install `typora-community-plugin` first. Then download these four assets from the [`0.1.0-alpha.1` release](https://github.com/Eleef/typora-side-by-side-translator/releases/tag/0.1.0-alpha.1) into the same directory:
+Install `typora-community-plugin` first. Then download these four assets from the [`0.1.0-alpha.2` release](https://github.com/Eleef/typora-side-by-side-translator/releases/tag/0.1.0-alpha.2) into the same directory:
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
@@ -139,8 +139,8 @@ npm test
 npm run build
 npm run package
 npm run test:windows-installer
-npm run version:set -- 0.1.0-alpha.1
-$env:RELEASE_TAG = "0.1.0-alpha.1"
+npm run version:set -- 0.1.0-alpha.2
+$env:RELEASE_TAG = "0.1.0-alpha.2"
 npm run check:release
 ```
 

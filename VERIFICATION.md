@@ -28,9 +28,9 @@ npm run check
 版本候选验证：
 
 ```powershell
-npm run version:set -- 0.1.0-alpha.1
+npm run version:set -- 0.1.0-alpha.2
 npm run ci
-$env:RELEASE_TAG = "0.1.0-alpha.1"
+$env:RELEASE_TAG = "0.1.0-alpha.2"
 npm run check:release
 ```
 
@@ -39,7 +39,7 @@ npm run check:release
 发布后远程验证：
 
 ```powershell
-npm run check:published -- --version 0.1.0-alpha.1
+npm run check:published -- --version 0.1.0-alpha.2
 ```
 
 该命令检查 GitHub Release 状态、四个发布资产、每个资产的 SHA-256、ZIP 根目录、插件 ID 和安装版本。正式版本还会验证 GitHub `latest` 指向该版本。
@@ -71,12 +71,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 中间版本 `eleef.typora-side-by-side-translation` 和更早版本的代码目录被安全移除
 - 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` SHA-256 分别一致
 - 完整 `doctor` 确认最低版本门槛、已验证组合和插件启动日志标记
-- 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.1`，并与本轮构建一致
+- 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.2`，并与本轮构建一致
 
 重启 Typora 后继续确认：
 
 - Installed Plugins 显示 **Typora Side-by-Side Translator**
-- 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.1**
+- 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.2**
 - 命令面板显示新名称下的 5 个命令，包括 `Cancel Translation`
 - 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
 

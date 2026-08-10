@@ -8,7 +8,7 @@
 
 > **Alpha 阶段：**核心流程已在下方 Windows 组合中运行。插件尚未进入社区插件市场，也尚未完成外部用户测试。
 
-当前开发版本：**`0.1.0-alpha.1`**。插件设置页顶部也会显示实际安装版本。
+当前开发版本：**`0.1.0-alpha.2`**。插件设置页顶部也会显示实际安装版本。
 
 ## 为什么做这个插件
 
@@ -34,7 +34,7 @@ Manifest 的最低门槛为 Typora `1.12.4` 和社区核心 `2.5.28`，但这不
 
 ### 安装 Alpha 发布包
 
-先安装 `typora-community-plugin`，然后从 [`0.1.0-alpha.1` Release](https://github.com/Eleef/typora-side-by-side-translator/releases/tag/0.1.0-alpha.1) 下载以下四个文件，并放在同一目录：
+先安装 `typora-community-plugin`，然后从 [`0.1.0-alpha.2` Release](https://github.com/Eleef/typora-side-by-side-translator/releases/tag/0.1.0-alpha.2) 下载以下四个文件，并放在同一目录：
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
@@ -139,8 +139,8 @@ npm test
 npm run build
 npm run package
 npm run test:windows-installer
-npm run version:set -- 0.1.0-alpha.1
-$env:RELEASE_TAG = "0.1.0-alpha.1"
+npm run version:set -- 0.1.0-alpha.2
+$env:RELEASE_TAG = "0.1.0-alpha.2"
 npm run check:release
 ```
 

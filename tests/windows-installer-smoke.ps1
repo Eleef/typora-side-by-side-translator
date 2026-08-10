@@ -9,10 +9,12 @@ $pluginStatesPath = Join-Path $communityRoot "settings\plugins.json"
 $releaseZip = Join-Path $workspace "release\plugin.zip"
 $utf8WithoutBom = [Text.UTF8Encoding]::new($false)
 $utf8WithBom = [Text.UTF8Encoding]::new($true)
+$windowsPowerShell = (Get-Command powershell.exe -ErrorAction Stop).Source
+$projectVersion = (Get-Content -LiteralPath (Join-Path $workspace "manifest.json") -Raw | ConvertFrom-Json).version
 
 function Invoke-Doctor {
   param ([string] $Mode)
-  & (Join-Path $workspace "scripts\doctor.ps1") -Mode $Mode -TyporaHome $typoraHome -CommunityRoot $communityRoot | Out-Host
+  & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "scripts\doctor.ps1") -Mode $Mode -TyporaHome $typoraHome -CommunityRoot $communityRoot | Out-Host
   $doctorExitCode = $LASTEXITCODE
   return $doctorExitCode
 }
@@ -43,9 +45,13 @@ try {
   [IO.File]::WriteAllText((Join-Path $communityRoot "2.9.14\core.css"), "/* test core */", $utf8WithoutBom)
   [IO.File]::WriteAllText($pluginStatesPath, '{"jiang.typora-bilingual":true}', $utf8WithBom)
 
-  & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot
+  $buildInstallOutput = @(& (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot)
+  $buildInstallOutput | Out-Host
   if ($LASTEXITCODE -ne 0) {
     throw "Installer failed in the healthy community-market fixture."
+  }
+  if (($buildInstallOutput -join "`n") -notmatch [Regex]::Escape("installed_version=$projectVersion") -or ($buildInstallOutput -join "`n") -notmatch "install_source=build") {
+    throw "Installer did not complete its post-install verification for the build source."
   }
 
   $stateBytes = [IO.File]::ReadAllBytes($pluginStatesPath)
@@ -77,12 +83,16 @@ try {
     }
   }
 
-  & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash
+  $zipInstallOutput = @(& (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash)
+  $zipInstallOutput | Out-Host
   if ($LASTEXITCODE -ne 0) {
     throw "Installer failed to install the packaged ZIP."
   }
+  if (($zipInstallOutput -join "`n") -notmatch [Regex]::Escape("installed_version=$projectVersion") -or ($zipInstallOutput -join "`n") -notmatch "install_source=zip") {
+    throw "Installer did not complete its post-install verification for the ZIP source."
+  }
   $installedManifest = Get-Content -LiteralPath (Join-Path $communityRoot "plugins\eleef.typora-side-by-side-translator\manifest.json") -Raw | ConvertFrom-Json
-  if ($installedManifest.version -ne "0.1.0-alpha.1") {
+  if ($installedManifest.version -ne $projectVersion) {
     throw "ZIP installer installed the wrong plugin version: $($installedManifest.version)"
   }
 

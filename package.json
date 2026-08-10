@@ -1,6 +1,6 @@
 {
   "name": "typora-side-by-side-translator",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "description": "Side-by-side Markdown translator for Typora with incremental refresh and clean export",
   "main": "dist/main.js",

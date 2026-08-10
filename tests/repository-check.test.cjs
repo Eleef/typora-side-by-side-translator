@@ -51,8 +51,9 @@ test("Windows installer writes plugin state JSON without a UTF-8 BOM", () => {
 test("Windows installer gates installation on community market health and enables the plugin", () => {
   const installer = fs.readFileSync(path.join(__dirname, "..", "scripts", "install-plugin.ps1"), "utf8");
 
-  assert.match(installer, /Mode\s*=\s*"Community"/);
-  assert.match(installer, /Mode\s*=\s*"Installed"/);
+  assert.match(installer, /Invoke-Doctor\s+"Community"/);
+  assert.match(installer, /Invoke-Doctor\s+"Installed"/);
+  assert.match(installer, /Get-Command\s+powershell\.exe/);
   assert.match(installer, /NotePropertyValue\s+\$true/);
   assert.match(installer, /Typora is open\. Close Typora/);
   assert.match(installer, /Security\.Cryptography\.SHA256/);
