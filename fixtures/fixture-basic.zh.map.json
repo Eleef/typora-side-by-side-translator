@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 2,
+  "translatedHashAlgorithm": "sha256",
+  "sourcePath": "fixtures/fixture-basic.md",
+  "targetPath": "fixtures/fixture-basic.zh.md",
+  "targetLang": "zh-CN",
+  "provider": "openai-compatible",
+  "model": "gpt-5.4-mini",
+  "updatedAt": "2026-04-15T15:48:00.427Z",
+  "blocks": [
+    {
+      "id": "5a34a4746d63494c",
+      "order": 0,
+      "headingPath": [
+        "Sample Article"
+      ],
+      "sourceHash": "eb5a40fa4c8dca9fe68fde62cde36d27c3d68d5db1c2d215baa8b744dda88a58",
+      "translatedHash": "f45898272b400f69eaa29ac9bb5f9d6585c4562bd2a56f09486f49f89c4bd624",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "4617b7a096f1685a",
+      "order": 1,
+      "headingPath": [
+        "Sample Article"
+      ],
+      "sourceHash": "def71324bb6500fed52037dc7839c43561c3ec62e4980abb00be29b382bd255e",
+      "translatedHash": "a3206a79bed3112c45134ad2c9177abb9a80daaab615f776a58244855c297c29",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "a9529f798ecf52ac",
+      "order": 2,
+      "headingPath": [
+        "Sample Article",
+        "Background"
+      ],
+      "sourceHash": "25ec22c6c793c11b723c98f2e6fdc864d41db9fcab91e5ece30c4a75d064823c",
+      "translatedHash": "3912698a555bc76a42ee671d006fcedd86861259667b982a9c575cb4b2c285f4",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "9b1d722e4a302fc2",
+      "order": 3,
+      "headingPath": [
+        "Sample Article",
+        "Background"
+      ],
+      "sourceHash": "16ebad3c8ebb0fd243afb5edd5432519b991e8de0fd97e3eeed8c941fadf6c6d",
+      "translatedHash": "7922c2c1b50c51e37eb009c72fdf20fc4823515bb2ba44b22f92b41067c1c2a3",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "2d8e1a7ee91b9bec",
+      "order": 4,
+      "headingPath": [
+        "Sample Article",
+        "Background"
+      ],
+      "sourceHash": "b6ff4404733f670d65c2acad31d7d9922734852ae9112f5d5f54fa25b4773b73",
+      "translatedHash": "6876414f254852a32f2509c3de2cb537e5eb76a78e545653720a7cc9fccc6293",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "ead7e623b4ccee73",
+      "order": 5,
+      "headingPath": [
+        "Sample Article",
+        "Background"
+      ],
+      "sourceHash": "8ca40b23adfe42aaf2d2bc3db427a29688a53cba3cd73e4bdc75e0a2cce688f5",
+      "translatedHash": "f2ca9b45a2b515902adbbbfd4e22b84f9961b80bf8e4bd87aa99d84ab6ae7a48",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "c5b68dc2ed6ca275",
+      "order": 6,
+      "headingPath": [
+        "Sample Article",
+        "Background"
+      ],
+      "sourceHash": "f31abdfca2ca88de4d03a0c0d97de42ef4e6587cfe528a3c97fc17733771dfef",
+      "translatedHash": "ee6e28e78a04884819f4e53f3a941f44944f771bf816db521cb4a00ed191d6ff",
+      "stale": false,
+      "manuallyEdited": false
+    }
+  ]
+}

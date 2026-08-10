@@ -1,0 +1,61 @@
+{
+  "name": "typora-side-by-side-translator",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Side-by-side Markdown translator for Typora with incremental refresh and clean export",
+  "main": "dist/main.js",
+  "license": "MIT",
+  "author": "Eleef",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Eleef/typora-side-by-side-translator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Eleef/typora-side-by-side-translator/issues"
+  },
+  "homepage": "https://github.com/Eleef/typora-side-by-side-translator#readme",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "clean": "node scripts/clean.js",
+    "check:repo": "node scripts/check-repository.js",
+    "typecheck": "tsc --noEmit",
+    "test:compile": "tsc -p tsconfig.test.json",
+    "test": "npm run test:compile && node --test .test-dist/tests/security-contracts.test.js .test-dist/tests/markdown-contracts.test.js .test-dist/tests/incremental-translation.test.js tests/repository-check.test.cjs",
+    "test:windows-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/windows-installer-smoke.ps1",
+    "check": "npm run typecheck && npm test && npm run build",
+    "package": "npm run clean && npm run build && node scripts/package-plugin.js && node scripts/release-checksum.js",
+    "check:package": "node scripts/check-release.js --package-only",
+    "check:published": "node scripts/check-published-release.js",
+    "check:reproducible": "node scripts/check-reproducible-package.js",
+    "check:release": "node scripts/check-release.js",
+    "version:set": "node scripts/set-version.js",
+    "ci": "npm run clean && npm run check:repo && npm run check && npm run package && npm run check:package && npm run check:reproducible"
+  },
+  "dependencies": {
+    "@typora-community-plugin/core": "2.5.28",
+    "markdown-it": "^14.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@types/archiver": "^8.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@typora-community-plugin/rollup-plugin-typora": "^1.1.0",
+    "archiver": "^8.0.0",
+    "rollup": "^4.40.0",
+    "rollup-plugin-esbuild": "^6.2.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.8.3"
+  }
+}

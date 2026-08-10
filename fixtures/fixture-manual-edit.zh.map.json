@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "translatedHashAlgorithm": "sha256",
+  "sourcePath": "fixtures/fixture-manual-edit.md",
+  "targetPath": "fixtures/fixture-manual-edit.zh.md",
+  "targetLang": "zh-CN",
+  "provider": "openai-compatible",
+  "model": "gpt-5.4-mini",
+  "updatedAt": "2026-04-15T15:47:39.919Z",
+  "blocks": [
+    {
+      "id": "ae83650106631d67",
+      "order": 0,
+      "headingPath": [
+        "Manual Edit Fixture"
+      ],
+      "sourceHash": "0e0a817ddc7a47e0b20aeeea6291f8eaa6e9cab726c89c1b334b692194667384",
+      "translatedHash": "dd5853cb817ba50c4d9a62ad9349c1ce9b343bf79775a52bdaf21e58128adfff",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "8b7505faa0c1ef89",
+      "order": 1,
+      "headingPath": [
+        "Manual Edit Fixture"
+      ],
+      "sourceHash": "8dede37f42aa982d76cad9ffa9fd75a67df0a68ddbb59ff2ec3564bef7bdb897",
+      "translatedHash": "ac98fbdfb0a8c596e4d41e6dce88a325304fc2c21508ab13987ed4020c765007",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "7496c0fc4f3d2955",
+      "order": 2,
+      "headingPath": [
+        "Manual Edit Fixture",
+        "Paragraph One"
+      ],
+      "sourceHash": "bbf40693043f8ed7e22306319c322e95931216a467e5c0045e612cdab2021288",
+      "translatedHash": "44d6e39ed9fdd57b2e26bf81b6be64d2623135e080f1cc94c194a72fba1c5759",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "0b41975f09456a8f",
+      "order": 3,
+      "headingPath": [
+        "Manual Edit Fixture",
+        "Paragraph One"
+      ],
+      "sourceHash": "5734558daa0ce76316420ce03031ccde57e9f2785fefb0b2e7b25944941e9951",
+      "translatedHash": "491fae8b014ed918cd7706b87411cfd4b119dd75d0d8fd5686c0a152567136fd",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "f947c2ac9b1e8dda",
+      "order": 4,
+      "headingPath": [
+        "Manual Edit Fixture",
+        "Paragraph Two"
+      ],
+      "sourceHash": "d15018543f3d24bae0d931b6cf044486d107448e3d4e163beb78091d33addce6",
+      "translatedHash": "42d5643423a6dd7555055c7081bdb57794886c10210af4f8202fec0f4e209ab3",
+      "stale": false,
+      "manuallyEdited": false
+    },
+    {
+      "id": "4a75609c0a9815da",
+      "order": 5,
+      "headingPath": [
+        "Manual Edit Fixture",
+        "Paragraph Two"
+      ],
+      "sourceHash": "5aa3dc8e292aed8a114f7d4108584960dc1ff2dedcfe73edaa87ccfbf4ae738c",
+      "translatedHash": "aafed07ae19189f5486310a8185251cd0ccb8f1c1efc0a4ee652668f5c14f6a9",
+      "stale": false,
+      "manuallyEdited": false
+    }
+  ]
+}

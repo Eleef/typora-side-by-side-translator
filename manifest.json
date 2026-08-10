@@ -1,0 +1,14 @@
+{
+  "id": "eleef.typora-side-by-side-translator",
+  "name": "Typora Side-by-Side Translator",
+  "version": "0.1.0-alpha.1",
+  "description": "Side-by-side Markdown translator for Typora with incremental refresh and clean export.",
+  "author": "Eleef",
+  "authorUrl": "https://github.com/Eleef",
+  "repo": "Eleef/typora-side-by-side-translator",
+  "minAppVersion": "1.12.4",
+  "minCoreVersion": "2.5.28",
+  "platforms": [
+    "win32"
+  ]
+}

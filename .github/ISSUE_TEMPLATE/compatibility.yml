@@ -1,0 +1,47 @@
+name: Compatibility report
+description: Report behavior on an unverified Typora, host-plugin, or operating-system version.
+title: "[Compatibility]: "
+labels:
+  - compatibility
+body:
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+    validations:
+      required: true
+  - type: input
+    id: typora-version
+    attributes:
+      label: Typora version
+    validations:
+      required: true
+  - type: input
+    id: core-version
+    attributes:
+      label: typora-community-plugin version
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system and version
+    validations:
+      required: true
+  - type: dropdown
+    id: loader
+    attributes:
+      label: Is the community plugin market visible?
+      options:
+        - Yes
+        - No
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Test result
+      description: Describe plugin loading, commands, pane, translation, export, and any failure. Do not include secrets or private documents.
+    validations:
+      required: true

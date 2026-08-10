@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible defect in a supported environment.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include API keys, private document text, full local paths, or unredacted logs.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: 0.1.0-alpha
+    validations:
+      required: true
+  - type: input
+    id: typora-version
+    attributes:
+      label: Typora version
+      placeholder: 1.12.4
+    validations:
+      required: true
+  - type: input
+    id: core-version
+    attributes:
+      label: typora-community-plugin version
+      placeholder: 2.7.1
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use non-sensitive sample Markdown and list the exact commands or buttons used.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Did this work before?
+      options:
+        - Unknown
+        - No
+        - Yes
+    validations:
+      required: true

@@ -1,0 +1,100 @@
+$ErrorActionPreference = "Stop"
+
+$workspace = Split-Path -Parent $PSScriptRoot
+$sandbox = Join-Path ([IO.Path]::GetTempPath()) ("typora-side-by-side-installer-" + [Guid]::NewGuid().ToString("N"))
+$typoraHome = Join-Path $sandbox "Typora"
+$communityRoot = Join-Path $sandbox "community-plugins"
+$windowHtml = Join-Path $typoraHome "resources\window.html"
+$pluginStatesPath = Join-Path $communityRoot "settings\plugins.json"
+$releaseZip = Join-Path $workspace "release\plugin.zip"
+$utf8WithoutBom = [Text.UTF8Encoding]::new($false)
+$utf8WithBom = [Text.UTF8Encoding]::new($true)
+
+function Invoke-Doctor {
+  param ([string] $Mode)
+  & (Join-Path $workspace "scripts\doctor.ps1") -Mode $Mode -TyporaHome $typoraHome -CommunityRoot $communityRoot | Out-Host
+  $doctorExitCode = $LASTEXITCODE
+  return $doctorExitCode
+}
+
+try {
+  New-Item -ItemType Directory -Force (Split-Path $windowHtml -Parent) | Out-Null
+  New-Item -ItemType Directory -Force (Join-Path $communityRoot "2.9.14") | Out-Null
+  New-Item -ItemType Directory -Force (Split-Path $pluginStatesPath -Parent) | Out-Null
+  Copy-Item (Join-Path $env:WINDIR "System32\notepad.exe") (Join-Path $typoraHome "Typora.exe")
+
+  [IO.File]::WriteAllText($windowHtml, '<script src="typora://app/userData/plugins/loader.js" type="module"></script></body></html>', $utf8WithoutBom)
+  [IO.File]::WriteAllText((Join-Path $communityRoot "loader.js"), "// test loader", $utf8WithoutBom)
+  [IO.File]::WriteAllText((Join-Path $communityRoot "loader.json"), '{"coreVersion":"2.9.14","debug":false}', $utf8WithoutBom)
+  [IO.File]::WriteAllText((Join-Path $communityRoot "2.9.14\core.js"), "// test core", $utf8WithoutBom)
+  [IO.File]::WriteAllText((Join-Path $communityRoot "2.9.14\core.css"), "/* test core */", $utf8WithoutBom)
+  [IO.File]::WriteAllText($pluginStatesPath, '{"jiang.typora-bilingual":true}', $utf8WithBom)
+
+  & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot
+  if ($LASTEXITCODE -ne 0) {
+    throw "Installer failed in the healthy community-market fixture."
+  }
+
+  $stateBytes = [IO.File]::ReadAllBytes($pluginStatesPath)
+  if ($stateBytes.Length -ge 3 -and $stateBytes[0] -eq 0xEF -and $stateBytes[1] -eq 0xBB -and $stateBytes[2] -eq 0xBF) {
+    throw "Installer left a UTF-8 BOM in plugins.json."
+  }
+  $pluginStates = [IO.File]::ReadAllText($pluginStatesPath) | ConvertFrom-Json
+  if (-not [bool]$pluginStates.PSObject.Properties["eleef.typora-side-by-side-translator"].Value) {
+    throw "Installer did not enable the current plugin ID."
+  }
+  if ($pluginStates.PSObject.Properties["jiang.typora-bilingual"]) {
+    throw "Installer did not remove the legacy plugin ID."
+  }
+  if ((Invoke-Doctor "Installed") -ne 0) {
+    throw "Installed-mode doctor failed after a healthy installation."
+  }
+
+  if (-not (Test-Path -LiteralPath $releaseZip -PathType Leaf)) {
+    throw "Release package is required for ZIP installer smoke: $releaseZip"
+  }
+  $releaseHash = (Get-FileHash -LiteralPath $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+  try {
+    & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 ("0" * 64)
+    throw "Installer unexpectedly accepted an incorrect package checksum."
+  }
+  catch {
+    if ($_.Exception.Message -notmatch "checksum mismatch") {
+      throw
+    }
+  }
+
+  & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash
+  if ($LASTEXITCODE -ne 0) {
+    throw "Installer failed to install the packaged ZIP."
+  }
+  $installedManifest = Get-Content -LiteralPath (Join-Path $communityRoot "plugins\eleef.typora-side-by-side-translator\manifest.json") -Raw | ConvertFrom-Json
+  if ($installedManifest.version -ne "0.1.0-alpha.1") {
+    throw "ZIP installer installed the wrong plugin version: $($installedManifest.version)"
+  }
+
+  [IO.File]::WriteAllText($windowHtml, "</body></html>", $utf8WithoutBom)
+  if ((Invoke-Doctor "Community") -eq 0) {
+    throw "Community-mode doctor accepted a missing loader injection."
+  }
+
+  [IO.File]::WriteAllText($windowHtml, '<script src="typora://app/userData/plugins/loader.js" type="module"></script></body></html>', $utf8WithoutBom)
+  $validStates = [IO.File]::ReadAllText($pluginStatesPath)
+  [IO.File]::WriteAllText($pluginStatesPath, $validStates, $utf8WithBom)
+  if ((Invoke-Doctor "Installed") -eq 0) {
+    throw "Installed-mode doctor accepted a BOM-prefixed plugins.json."
+  }
+
+  Write-Output "windows_installer_smoke=passed"
+  Write-Output "windows_zip_installer_smoke=passed"
+}
+finally {
+  if (Test-Path $sandbox) {
+    $resolvedSandbox = [IO.Path]::GetFullPath($sandbox)
+    $resolvedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if (-not $resolvedSandbox.StartsWith($resolvedTemp, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to clean unexpected test path: $resolvedSandbox"
+    }
+    Remove-Item -LiteralPath $resolvedSandbox -Recurse -Force
+  }
+}

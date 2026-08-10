@@ -1,0 +1,296 @@
+# MVP Verification
+
+## 环境
+
+- Windows 10/11
+- Typora 1.14.9
+- typora-community-plugin 2.9.14
+- 当前组合于 2026-08-10 完成安装、加载、pane 和迁移 smoke
+
+## 构建验证
+
+命令：
+
+```powershell
+npm run check
+```
+
+期望结果：
+
+- `dist/main.js` 存在
+- `build/typora-side-by-side-translator/main.js` 存在
+- `build/typora-side-by-side-translator/manifest.json` 存在
+- `build/typora-side-by-side-translator/style.css` 存在
+- 严格类型检查通过
+- 运行时安全、增量翻译、Markdown/导出、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 45 项
+- 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
+
+版本候选验证：
+
+```powershell
+npm run version:set -- 0.1.0-alpha.1
+npm run ci
+$env:RELEASE_TAG = "0.1.0-alpha.1"
+npm run check:release
+```
+
+期望 package、lock、源码 Manifest、构建 Manifest、ZIP Manifest 和 Release tag 完全一致，且 tag 不带 `v` 前缀。
+
+发布后远程验证：
+
+```powershell
+npm run check:published -- --version 0.1.0-alpha.1
+```
+
+该命令检查 GitHub Release 状态、四个发布资产、每个资产的 SHA-256、ZIP 根目录、插件 ID 和安装版本。正式版本还会验证 GitHub `latest` 指向该版本。
+
+Windows 安装器回归：
+
+```powershell
+npm run test:windows-installer
+```
+
+该测试会构造隔离的 Typora/社区市场目录，验证健康安装、自动启用和无 BOM 写入，并确认缺少市场注入或启用配置带 BOM 时 `doctor` 必须失败。
+
+## 安装验证
+
+命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1 -Mode Community
+powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1 -PackagePath .\release\plugin.zip -ExpectedSha256 ((Get-Content .\release\SHA256SUMS.txt | Select-String 'plugin\.zip').Line.Split()[0])
+powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+```
+
+期望结果：
+
+- `%USERPROFILE%\.typora\community-plugins\plugins\eleef.typora-side-by-side-translator\main.js` 存在
+- `doctor -Mode Community` 确认 Typora、社区市场注入、loader 和 core 完整
+- `plugins.json` 为无 BOM UTF-8，当前插件 ID 自动启用，旧 ID 被移除
+- 中间版本 `eleef.typora-side-by-side-translation` 和更早版本的代码目录被安全移除
+- 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` SHA-256 分别一致
+- 完整 `doctor` 确认最低版本门槛、已验证组合和插件启动日志标记
+- 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.1`，并与本轮构建一致
+
+重启 Typora 后继续确认：
+
+- Installed Plugins 显示 **Typora Side-by-Side Translator**
+- 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.1**
+- 命令面板显示新名称下的 5 个命令，包括 `Cancel Translation`
+- 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
+
+## Smoke 场景
+
+### 1. Pane 开关
+
+1. 打开 `fixtures/fixture-basic.md`
+2. 执行 `Typora Side-by-Side Translator: Toggle Pane`
+
+期望：
+
+- 右侧 pane 出现
+- 工具栏与状态提示显示为右上角悬浮层，不占正文顶部高度
+- 原文首块与译文首块从同一垂直起点开始
+- 右侧没有独立滚动条
+- 左侧 Typora 编辑区仍可正常输入和滚动
+
+### 1.1 比例调整
+
+1. 显示右侧 pane
+2. 拖拽中间分隔条
+3. 双击分隔条
+4. 点击 `40/60`、`50/50`、`60/40` 预设按钮
+
+期望：
+
+- 拖拽时比例实时变化
+- 释放后宽度被持久化
+- 双击后恢复 `50/50`
+- 点击预设后布局立即切换并持久化
+
+### 1.2 工具栏模式
+
+1. 在设置页将 `toolbarDisplayMode` 设为 `compact`
+2. 打开 pane 并观察右上角工具栏
+3. 再将 `toolbarDisplayMode` 设为 `collapsed`
+4. 观察折叠入口，并移入或点击展开
+
+期望：
+
+- `compact` 为紧凑单行悬浮层
+- `collapsed` 默认只显示小入口，移入或点击后展开完整工具栏
+- 两种模式都不会让译文正文整列继续向左缩窄
+- 模式切换后共享滚动与高亮仍正常
+
+### 2. 首次全文翻译
+
+1. 配置 `baseUrl/apiKey/model`
+2. 执行 `Typora Side-by-Side Translator: Translate Current File`
+
+期望：
+
+- 原文目录下不生成 `.zh.md` / `.zh.map.json`
+- 插件缓存区生成缓存译文和 map
+- 右侧渲染译文内容
+
+### 2.1 取消与重复任务
+
+1. 对较长文档执行 `Translate Current File`
+2. 请求运行时再次执行翻译命令，确认不会启动第二个任务
+3. 执行 `Typora Side-by-Side Translator: Cancel Translation`
+
+期望：
+
+- 工具栏显示“取消翻译”，全文翻译和刷新按钮在任务期间禁用
+- 重复命令不产生第二组网络请求
+- 取消后显示明确状态，现有缓存译文和 map 不被覆盖
+- 切换文件或关闭 Typora 时，旧任务也会取消
+
+### 3. 导出净化
+
+1. 在首次全文翻译后点击“导出译文”
+
+期望：
+
+- 原文目录下生成 `.zh.md`
+- 导出的 `.zh.md` 中不包含 `typora-side-by-side:block-*` 或旧版 `typora-bilingual:block-*` 注释
+- 标题、列表、引用、代码块、公式、表格结构可正常阅读
+
+### 4. 脏区刷新
+
+1. 修改原文一个段落
+2. 执行 `Typora Side-by-Side Translator: Refresh Stale Blocks`
+
+期望：
+
+- 编辑后仅提示脏区，不自动调用翻译
+- 刷新后脏区归零
+
+### 5. 结构保护
+
+1. 打开 `fixtures/fixture-structured.md`
+2. 执行全文翻译
+
+期望：
+
+- 代码块围栏保留
+- 数学公式原样保留
+- HTML 块原样保留
+- 表格不崩坏
+
+### 6. 人工改写保护
+
+1. 打开 `fixtures/fixture-manual-edit.md`
+2. 执行全文翻译
+3. 在设置页找到翻译缓存目录，手工修改当前缓存 `.zh.md` 中某一控制块的译文正文
+4. 回到原文，修改对应原文块
+5. 执行 `Refresh Stale Blocks`
+
+期望：
+
+- 手工修改过的缓存译文块默认不被覆盖
+- 人工清空为零字符的缓存译文块也视为手工修改，不被静默补回
+- 原文目录里的导出文件不会被静默改写
+
+### 6.1 损坏或不完整缓存保护
+
+1. 完成一次全文翻译并退出 Typora
+2. 备份缓存后，分别模拟删除 map 文件和将 map 文件改成无效 JSON
+3. 重新打开 Typora，执行 `Refresh Stale Blocks`
+4. 再明确执行 `Translate Current File`
+
+期望：
+
+- 脏区刷新在网络请求和写盘前停止，并提示缓存不完整、损坏或不可读
+- 原缓存译文不被脏区刷新覆盖
+- 用户明确执行全文翻译后，缓存译文和 map 可一起重建
+
+### 7. 共享滚动
+
+1. 打开一个较长文档并显示右栏
+2. 在右侧区域使用鼠标滚轮或触控板滚动
+3. 持续滚动原文长文档
+4. 在出现错误或警告提示时继续滚动观察
+
+期望：
+
+- 右侧没有独立滚动条
+- 实际滚动的是 Typora 主滚动容器
+- 右侧高亮块随原文滚动更新
+- 同屏位置大体保持对齐，不出现明显错位累积
+- 错误/警告提示为悬浮层，不会把正文首块继续向下推
+
+### 8. 错误处理
+
+1. 把 `baseUrl` 改成一个无效地址
+2. 执行全文翻译
+
+期望：
+
+- 右栏显示悬浮错误提示
+- Typora 主编辑区不冻结
+- 模型返回 `typora-side-by-side:block-*` 或旧版 `typora-bilingual:block-*` 保留控制注释时安全失败，不写入缓存
+
+### 9. 服务地址限制
+
+1. 尝试保存远程 HTTP 地址，例如 `http://api.example.com/v1`
+2. 尝试保存本地地址，例如 `http://127.0.0.1:11434/v1`
+3. 尝试保存带用户名、密码或查询参数的地址
+
+期望：
+
+- 远程 HTTP 被拒绝并显示明确原因
+- 本机回环地址的 HTTP 可以保存
+- 用户名、密码、查询参数和页面锚点被拒绝
+
+### 10. 会话级 API Key
+
+1. 先配置 `baseUrl`，再输入 API key
+2. 关闭并重新打开设置页，确认当前会话仍可使用
+3. 将 `baseUrl` 改到另一个域名
+4. 重启 Typora
+
+期望：
+
+- 不同服务来源不能复用旧 key
+- 重启后 API key 为空，需要重新输入
+- 插件设置文件中 `apiKey` 始终为空字符串
+
+### 11. Map 摘要、块标识与旧格式迁移
+
+1. 打开一个由旧版本生成、`translatedHash` 仍是完整译文的缓存文档
+2. 不执行翻译，只显示 pane
+3. 检查缓存 map
+
+期望：
+
+- 新 map 使用 `schemaVersion: 4`、`translatedHashAlgorithm: sha256`、`blockIdAlgorithm: position-v1` 和 `cacheGeneration`
+- 缓存译文头与 map 的 `cacheGeneration` 相同，块 ID 集合与数量一致
+- 缓存对先写临时文件再替换，第二个文件提交失败时恢复上一对正式文件
+- 每个 `translatedHash` 是 64 位十六进制摘要
+- 人工修改标记仍可正确识别
+- schema 2 摘要不会被重复哈希
+- 缺少 `blockIdAlgorithm` 的旧缓存执行“刷新脏区”时被拒绝，执行“全文翻译”时允许显式重建
+- 文档结构变化且存在人工改写时，刷新脏区被拒绝；无人工改写时允许重译受影响位置
+
+### 12. 缓存与日志清理
+
+1. 在设置页检查缓存目录、文件数和占用
+2. 点击“清理当前文档”
+3. 点击“清理全部缓存”并确认
+4. 点击“清理日志”
+
+期望：
+
+- 当前文档清理不影响其他缓存和已导出的 `.zh.md`
+- 全部清理只删除插件翻译缓存
+- 日志和轮转备份均被删除
+- 日志中不出现 API key、完整本地路径或带查询参数的服务地址
+
+## 已知风险
+
+- 当前共享滚动依赖块级最小高度对齐，属于可读同步，不是像素级双编辑器对齐
+- 当前右栏渲染使用 `markdown-it`，视觉上不会完全等同 Typora 原生渲染
+- 当前右栏缓存文件保留内部控制注释，仅导出文件为纯净 Markdown
+- 当前没有可确认的宿主系统凭据 API，API key 采用会话级存储，重启后需重新输入

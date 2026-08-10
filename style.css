@@ -1,0 +1,298 @@
+.typora-bilingual-host {
+  --typora-bilingual-pane-width: 50%;
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.typora-bilingual-host > .typora-bilingual-source {
+  flex: 0 0 calc(100% - var(--typora-bilingual-pane-width) - 16px);
+  width: calc(100% - var(--typora-bilingual-pane-width) - 16px);
+  max-width: calc(100% - var(--typora-bilingual-pane-width) - 16px);
+  min-width: 0;
+  overflow: hidden;
+  align-self: stretch;
+}
+
+.typora-bilingual-host > .typora-bilingual-source > #write {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+}
+
+.typora-bilingual-resizer {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 16px;
+  align-self: stretch;
+  min-height: 100%;
+  cursor: col-resize;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 3px,
+    rgba(127, 127, 127, 0.12) 3px,
+    rgba(127, 127, 127, 0.12) 5px,
+    rgba(127, 127, 127, 0.12) 9px,
+    rgba(127, 127, 127, 0.12) 11px,
+    transparent 11px,
+    transparent 100%
+  );
+}
+
+.typora-bilingual-resizer:hover {
+  background: linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 2px,
+      rgba(11, 83, 148, 0.22) 2px,
+      rgba(11, 83, 148, 0.22) 5px,
+      rgba(11, 83, 148, 0.22) 9px,
+      rgba(11, 83, 148, 0.22) 12px,
+      transparent 12px,
+      transparent 100%
+    ),
+    rgba(11, 83, 148, 0.06);
+}
+
+.typora-bilingual-resizer.is-active {
+  background: linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 2px,
+      rgba(11, 83, 148, 0.34) 2px,
+      rgba(11, 83, 148, 0.34) 5px,
+      rgba(11, 83, 148, 0.34) 9px,
+      rgba(11, 83, 148, 0.34) 12px,
+      transparent 12px,
+      transparent 100%
+    ),
+    rgba(11, 83, 148, 0.12);
+}
+
+.typora-bilingual-pane {
+  flex: 0 0 var(--typora-bilingual-pane-width);
+  min-width: 35%;
+  max-width: 65%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #222);
+}
+
+.typora-bilingual-pane.is-hidden {
+  display: none;
+}
+
+.typora-bilingual-pane__overlay {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  width: min(320px, calc(100% - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  align-items: flex-end;
+}
+
+.typora-bilingual-pane__toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.18));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-color, #fff) 90%, rgba(255, 255, 255, 0.8) 10%);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+  pointer-events: auto;
+}
+
+.typora-bilingual-pane__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.typora-bilingual-pane__button {
+  border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.25));
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  padding: 4px 7px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.typora-bilingual-pane__button:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.typora-bilingual-pane__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.typora-bilingual-pane__button.is-hidden {
+  display: none;
+}
+
+.typora-bilingual-pane__controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.typora-bilingual-pane__presets {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.typora-bilingual-pane__preset {
+  border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.24));
+  background: rgba(255, 255, 255, 0.68);
+  border-radius: 999px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.typora-bilingual-pane__preset:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.typora-bilingual-pane__preset.is-active {
+  background: rgba(11, 83, 148, 0.12);
+  border-color: rgba(11, 83, 148, 0.24);
+  color: #0b5394;
+}
+
+.typora-bilingual-pane__status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #56606f;
+  background: rgba(99, 102, 241, 0.08);
+  white-space: nowrap;
+}
+
+.typora-bilingual-pane__status-badge[data-kind="cached"] {
+  color: #0b5394;
+  background: rgba(11, 83, 148, 0.12);
+}
+
+.typora-bilingual-pane__status-badge[data-kind="stale"] {
+  color: #7a5a00;
+  background: rgba(255, 193, 7, 0.18);
+}
+
+.typora-bilingual-pane__status-badge[data-kind="error"] {
+  color: #8f2431;
+  background: rgba(220, 53, 69, 0.12);
+}
+
+.typora-bilingual-pane__message {
+  max-width: min(320px, calc(100vw - 48px));
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(127, 127, 127, 0.14);
+  pointer-events: auto;
+}
+
+.typora-bilingual-pane__message.is-hidden {
+  display: none;
+}
+
+.typora-bilingual-pane__message[data-kind="warning"] {
+  background: rgba(255, 193, 7, 0.12);
+  color: #7a5a00;
+}
+
+.typora-bilingual-pane__message[data-kind="error"] {
+  background: rgba(220, 53, 69, 0.1);
+  color: #8f2431;
+}
+
+.typora-bilingual-pane__body {
+  flex: 1 1 auto;
+  overflow: visible;
+  padding: 0 18px 24px;
+}
+
+.typora-bilingual-pane__empty {
+  padding: 24px 18px;
+  font-size: 13px;
+  color: var(--meta-content-color, #666);
+  border: 1px dashed var(--control-border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 12px;
+}
+
+.typora-bilingual-pane__block {
+  margin-bottom: 14px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.typora-bilingual-pane__block[data-translatable="true"]:hover {
+  background: rgba(127, 127, 127, 0.06);
+}
+
+.typora-bilingual-pane__block.is-active {
+  outline: 2px solid rgba(0, 122, 255, 0.18);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.typora-bilingual-pane__block[data-type="heading"] h1,
+.typora-bilingual-pane__block[data-type="heading"] h2,
+.typora-bilingual-pane__block[data-type="heading"] h3,
+.typora-bilingual-pane__block[data-type="heading"] h4,
+.typora-bilingual-pane__block[data-type="heading"] h5,
+.typora-bilingual-pane__block[data-type="heading"] h6 {
+  margin: 0 0 6px;
+}
+
+.typora-bilingual-pane__collapsed-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.22));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-color, #fff) 92%, rgba(255, 255, 255, 0.8) 8%);
+  color: var(--meta-content-color, #666);
+  font-size: 12px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.typora-bilingual-pane__collapsed-toggle.is-hidden,
+.typora-bilingual-pane__toolbar.is-hidden {
+  display: none;
+}
+
+.typora-bilingual-pane__overlay[data-toolbar-mode="collapsed"][data-expanded="true"] .typora-bilingual-pane__collapsed-toggle {
+  opacity: 0.76;
+}
