@@ -81,6 +81,15 @@ test("Windows doctor checks the community market, compatibility and runtime mark
   assert.match(doctor, /Test-Utf8Bom/);
 });
 
+test("persistent API key storage remains an explicit plaintext opt-in", () => {
+  const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+
+  assert.match(pluginMain, /credentialStorageMode:\s*"session"/);
+  assert.match(pluginMain, /\["plugin-settings",\s*"保存在插件设置中（明文）"\]/);
+  assert.match(pluginMain, /storedApiKey/);
+  assert.match(pluginMain, /同一 Windows 用户下的其他程序可以读取/);
+});
+
 test("release versions use numeric semantic versions without a v prefix", () => {
   assert.equal(isValidVersion("0.1.0-alpha.1"), true);
   assert.equal(isValidVersion("0.1.0"), true);

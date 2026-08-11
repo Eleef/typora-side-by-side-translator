@@ -1,13 +1,15 @@
 import MarkdownIt from "markdown-it";
 import { AnchorMappingService } from "../sync/AnchorMappingService";
 import { ScrollSyncService } from "../sync/ScrollSyncService";
-import { PaneRenderState, TranslationBlock, TranslationBlockType } from "../types";
+import { PaneRenderState, TargetLanguage, TranslationBlock, TranslationBlockType } from "../types";
+import { getTargetLanguageDefinition, TARGET_LANGUAGES } from "../translation/TargetLanguage";
 
 interface PaneActions {
   onTranslateAll: () => void;
   onRefreshStale: () => void;
   onCancelTranslation: () => void;
   onExportTarget: () => void;
+  onTargetLanguageChange: (targetLang: TargetLanguage) => void;
   onJumpToSource: (blockId: string) => void;
   onResize: (paneWidthPercent: number) => void;
 }
@@ -75,6 +77,9 @@ export class TranslationPaneController {
       '      <button class="typora-bilingual-pane__button" data-action="export-target" type="button">导出译文</button>',
       "    </div>",
       '    <div class="typora-bilingual-pane__controls-row">',
+      '      <select class="typora-bilingual-pane__language" data-action="target-language" aria-label="目标语言">',
+      ...TARGET_LANGUAGES.map((language) => `        <option value="${language.code}">${language.label}</option>`),
+      "      </select>",
       '      <div class="typora-bilingual-pane__presets">',
       '        <button class="typora-bilingual-pane__preset" data-preset="60" type="button">40/60</button>',
       '        <button class="typora-bilingual-pane__preset" data-preset="50" type="button">50/50</button>',
@@ -95,6 +100,13 @@ export class TranslationPaneController {
     if (!overlayEl || !statusBadgeEl || !messageEl || !paneBody) {
       throw new Error("译文 pane 初始化失败。");
     }
+
+    pane.addEventListener("change", (event) => {
+      const select = event.target as HTMLSelectElement;
+      if (select.dataset.action === "target-language") {
+        actions.onTargetLanguageChange(select.value as TargetLanguage);
+      }
+    });
 
     pane.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
@@ -185,10 +197,19 @@ export class TranslationPaneController {
     const translateButton = this.pane.querySelector<HTMLButtonElement>('[data-action="translate-all"]');
     const refreshButton = this.pane.querySelector<HTMLButtonElement>('[data-action="refresh-stale"]');
     const cancelButton = this.pane.querySelector<HTMLButtonElement>('[data-action="cancel-translation"]');
+    const languageSelect = this.pane.querySelector<HTMLSelectElement>('[data-action="target-language"]');
+    const collapsedToggle = this.pane.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
     if (translateButton && refreshButton && cancelButton) {
       translateButton.disabled = state.isTranslating;
       refreshButton.disabled = state.isTranslating;
       cancelButton.classList.toggle("is-hidden", !state.isTranslating);
+    }
+    if (languageSelect) {
+      languageSelect.value = state.targetLang;
+      languageSelect.disabled = state.isTranslating;
+    }
+    if (collapsedToggle) {
+      collapsedToggle.textContent = getTargetLanguageDefinition(state.targetLang).shortLabel;
     }
     if (state.toolbarDisplayMode === "compact") {
       this.toolbarExpanded = true;

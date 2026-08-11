@@ -152,6 +152,23 @@
   gap: 8px;
 }
 
+.typora-bilingual-pane__language {
+  max-width: 92px;
+  height: 24px;
+  border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.24));
+  border-radius: 6px;
+  padding: 0 5px;
+  background: color-mix(in srgb, var(--bg-color, #fff) 94%, rgba(255, 255, 255, 0.7) 6%);
+  color: var(--text-color, #222);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.typora-bilingual-pane__language:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .typora-bilingual-pane__presets {
   display: inline-flex;
   gap: 6px;

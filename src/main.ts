@@ -14,12 +14,13 @@ import { describeEndpointForDiagnostics, normalizeAndValidateBaseUrl } from "./s
 import { SessionCredentialStore } from "./security/SessionCredentialStore";
 import { ExplicitTranslationAuthorizer } from "./translation/ExplicitTranslationAuthorizer";
 import { OpenAICompatibleProvider } from "./translation/OpenAICompatibleProvider";
+import { normalizeTargetLanguage, TARGET_LANGUAGES } from "./translation/TargetLanguage";
 import { TranslationOrchestrator } from "./translation/TranslationOrchestrator";
 import {
   isTranslationCancelled,
   TranslationTaskCoordinator
 } from "./translation/TranslationTaskCoordinator";
-import { PaneRenderState, PluginSettingsData } from "./types";
+import { CredentialStorageMode, PaneRenderState, PluginSettingsData, TargetLanguage } from "./types";
 import { TranslationPaneController } from "./ui/TranslationPaneController";
 
 PluginDiagnostics.markModuleEvaluated();
@@ -32,6 +33,9 @@ const DEFAULT_SETTINGS: PluginSettingsData = {
   apiKey: "",
   model: "",
   timeoutMs: 45000,
+  targetLang: "zh-CN",
+  credentialStorageMode: "session",
+  storedApiKey: "",
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact"
 };
@@ -77,6 +81,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     blocks: [],
     isVisible: false,
     staleCount: 0,
+    targetLang: "zh-CN",
     paneWidthPercent: 50,
     toolbarDisplayMode: "compact",
     isTranslating: false
@@ -92,7 +97,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
     try {
       await this.migrateLegacyPluginData();
-      this.initializeSettings();
+      await this.initializeSettings();
       const translationsCacheRoot = this.getTranslationsCacheRoot();
       this.associationService = new FileAssociationService(translationsCacheRoot);
       this.cacheMaintenance = new CacheMaintenanceService(translationsCacheRoot, fs, corePath);
@@ -109,6 +114,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         onRefreshStale: () => void this.translateCurrentFile("stale"),
         onCancelTranslation: () => this.cancelCurrentTranslation(),
         onExportTarget: () => void this.exportTargetFile(),
+        onTargetLanguageChange: (targetLang) => void this.updateSetting("targetLang", targetLang),
         onJumpToSource: (blockId) => this.paneController.jumpToSource(blockId),
         onResize: (paneWidthPercent) => void this.updateSetting("paneWidthPercent", paneWidthPercent)
       });
@@ -127,17 +133,27 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       apiKey: this.sessionCredentials.get(this.settingsStore.get("baseUrl")),
       model: this.settingsStore.get("model"),
       timeoutMs: this.settingsStore.get("timeoutMs"),
+      targetLang: normalizeTargetLanguage(this.settingsStore.get("targetLang")),
+      credentialStorageMode: this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode")),
+      storedApiKey: this.settingsStore.get("storedApiKey") || "",
       paneWidthPercent: this.normalizePaneWidth(this.settingsStore.get("paneWidthPercent")),
       toolbarDisplayMode: this.normalizeToolbarDisplayMode(this.settingsStore.get("toolbarDisplayMode"))
     };
   }
 
   public async updateSetting<K extends keyof PluginSettingsData>(key: K, value: PluginSettingsData[K]): Promise<void> {
+    if (key === "storedApiKey") {
+      throw new Error("已保存的 API key 只能由插件内部更新。");
+    }
     if (key === "apiKey") {
-      this.sessionCredentials.set(this.settingsStore.get("baseUrl"), String(value));
-      this.settingsStore.set("apiKey", "");
-      this.settingsStore.save();
+      await this.updateApiKey(String(value));
       await this.diagnostics.info("setting updated", { key, value: Boolean(this.getRuntimeSettings().apiKey) });
+      return;
+    }
+
+    if (key === "credentialStorageMode") {
+      await this.updateCredentialStorageMode(this.normalizeCredentialStorageMode(value));
+      await this.diagnostics.info("setting updated", { key, value: this.getRuntimeSettings().credentialStorageMode });
       return;
     }
 
@@ -146,14 +162,21 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         ? (this.normalizePaneWidth(value as number) as PluginSettingsData[K])
         : key === "toolbarDisplayMode"
           ? (this.normalizeToolbarDisplayMode(value) as PluginSettingsData[K])
-        : key === "baseUrl"
-          ? (normalizeAndValidateBaseUrl(String(value)) as PluginSettingsData[K])
-        : value;
+          : key === "targetLang"
+            ? (normalizeTargetLanguage(value) as PluginSettingsData[K])
+            : key === "baseUrl"
+              ? (normalizeAndValidateBaseUrl(String(value)) as PluginSettingsData[K])
+              : value;
+    const previousOrigin = key === "baseUrl" ? this.getCredentialOrigin(this.settingsStore.get("baseUrl")) : "";
     this.settingsStore.set(key, nextValue);
-    this.settingsStore.save();
     if (key === "baseUrl") {
-      this.sessionCredentials.clearIfEndpointChanged(String(nextValue));
+      const nextOrigin = this.getCredentialOrigin(String(nextValue));
+      if (previousOrigin !== nextOrigin) {
+        this.sessionCredentials.clear();
+        this.clearStoredCredential();
+      }
     }
+    this.settingsStore.save();
     if (key === "paneWidthPercent" || key === "toolbarDisplayMode") {
       const runtime = this.getRuntimeSettings();
       this.renderState = {
@@ -162,6 +185,10 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         toolbarDisplayMode: runtime.toolbarDisplayMode
       };
       this.paneController.render(this.renderState);
+    }
+    if (key === "targetLang") {
+      this.translationTasks.cancelAll("目标语言已切换，翻译任务已取消。");
+      await this.refreshState();
     }
     await this.diagnostics.info("setting updated", {
       key,
@@ -179,6 +206,26 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
   public get pluginVersion(): string {
     return this.manifest.version;
+  }
+
+  public get credentialStatusDescription(): string {
+    const settings = this.getRuntimeSettings();
+    if (!settings.apiKey) {
+      return settings.credentialStorageMode === "plugin-settings"
+        ? "明文保存已开启；请输入 API key 后将写入社区插件设置。"
+        : "尚未配置 API key；仅在当前 Typora 会话中保留。";
+    }
+    return settings.credentialStorageMode === "plugin-settings" && !!settings.storedApiKey
+      ? "API key 已保存在社区插件设置中；同一 Windows 用户下的其他程序可读取。"
+      : "API key 仅在当前 Typora 会话中可用。";
+  }
+
+  public async clearApiKey(): Promise<void> {
+    this.sessionCredentials.clear();
+    this.clearStoredCredential();
+    this.settingsStore.set("apiKey", "");
+    this.settingsStore.save();
+    await this.diagnostics.info("API key cleared");
   }
 
   public async getCacheDescription(): Promise<string> {
@@ -215,10 +262,15 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     await this.diagnostics.clear();
   }
 
-  private initializeSettings(): void {
+  private async initializeSettings(): Promise<void> {
     this.settingsStore = new PluginSettings<PluginSettingsData>(coreApp as never, this.manifest, { version: 1 });
     this.settingsStore.setDefault(DEFAULT_SETTINGS);
     this.settingsStore.load();
+    this.settingsStore.set("targetLang", normalizeTargetLanguage(this.settingsStore.get("targetLang")));
+    this.settingsStore.set(
+      "credentialStorageMode",
+      this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode"))
+    );
     const persistedApiKey = this.settingsStore.get("apiKey") || this.migratedLegacyApiKey;
     if (persistedApiKey) {
       try {
@@ -230,7 +282,60 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       this.settingsStore.save();
       this.removedPersistedApiKey = true;
     }
+    if (
+      this.settingsStore.get("credentialStorageMode") === "plugin-settings" &&
+      this.settingsStore.get("storedApiKey")
+    ) {
+      try {
+        const baseUrl = this.settingsStore.get("baseUrl");
+        this.sessionCredentials.set(baseUrl, this.settingsStore.get("storedApiKey"));
+      } catch {
+        this.sessionCredentials.clear();
+        this.clearStoredCredential();
+        await this.diagnostics.warn("stored API key was invalid and has been cleared");
+      }
+    }
+    this.settingsStore.save();
     this.registerSettings(this.settingsStore);
+  }
+
+  private async updateApiKey(value: string): Promise<void> {
+    const baseUrl = this.settingsStore.get("baseUrl");
+    const normalizedValue = value.trim();
+    this.sessionCredentials.set(baseUrl, normalizedValue);
+    this.settingsStore.set("apiKey", "");
+    this.settingsStore.set(
+      "storedApiKey",
+      normalizedValue && this.settingsStore.get("credentialStorageMode") === "plugin-settings" ? normalizedValue : ""
+    );
+    this.settingsStore.save();
+  }
+
+  private async updateCredentialStorageMode(mode: CredentialStorageMode): Promise<void> {
+    if (mode === "plugin-settings") {
+      const baseUrl = this.settingsStore.get("baseUrl");
+      const apiKey = this.sessionCredentials.get(baseUrl);
+      if (apiKey) {
+        this.settingsStore.set("storedApiKey", apiKey);
+      }
+    } else {
+      this.clearStoredCredential();
+    }
+    this.settingsStore.set("credentialStorageMode", mode);
+    this.settingsStore.save();
+  }
+
+  private clearStoredCredential(): void {
+    this.settingsStore.set("storedApiKey", "");
+  }
+
+  private getCredentialOrigin(baseUrl: string): string {
+    try {
+      const normalized = normalizeAndValidateBaseUrl(baseUrl);
+      return normalized ? new URL(normalized).origin : "";
+    } catch {
+      return "";
+    }
   }
 
   private registerPluginCommands(): void {
@@ -352,6 +457,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         blocks: [],
         isVisible: this.paneVisible,
         staleCount: 0,
+        targetLang: runtime.targetLang,
         paneWidthPercent,
         toolbarDisplayMode: runtime.toolbarDisplayMode,
         isTranslating: false,
@@ -372,9 +478,10 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       blocks: state.blocks,
       isVisible: this.paneVisible,
       staleCount: state.staleCount,
+      targetLang: runtime.targetLang,
       paneWidthPercent,
       toolbarDisplayMode: runtime.toolbarDisplayMode,
-      isTranslating: this.translationTasks.isRunning(association.sourcePath),
+      isTranslating: this.translationTasks.isRunning(association.cacheTargetPath),
       warningMessage: state.staleCount > 0 && !!state.targetMarkdown ? "原文已更新，当前显示的是缓存译文，需手动刷新。" : undefined,
       errorMessage: undefined,
       infoMessage: undefined
@@ -396,7 +503,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       return;
     }
 
-    if (this.translationTasks.isRunning(association.sourcePath)) {
+    if (this.translationTasks.isRunning(association.cacheTargetPath)) {
       this.renderState = {
         ...this.renderState,
         association,
@@ -415,6 +522,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       isVisible: true,
       paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
       toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
+      targetLang: association.targetLang,
       isTranslating: true,
       errorMessage: undefined,
       infoMessage: undefined,
@@ -423,7 +531,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     this.paneController.render(this.renderState);
 
     try {
-      const result = await this.translationTasks.run(association.sourcePath, async (signal) => {
+      const result = await this.translationTasks.run(association.cacheTargetPath, async (signal) => {
         const sourceMarkdown = await this.readCurrentMarkdown(association.sourcePath);
         const authorization = this.translationAuthorizer.authorize(
           mode === "full" ? "translate-current-file" : "refresh-stale-blocks"
@@ -443,7 +551,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         cacheTargetPath: association.cacheTargetPath,
         blockCount: result.blocks.length
       });
-      if (this.getCurrentAssociation().sourcePath !== association.sourcePath) {
+      if (!this.isSameAssociation(this.getCurrentAssociation(), association)) {
         return;
       }
       const staleCount = result.map.blocks.filter((block) => block.stale).length;
@@ -454,6 +562,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         blocks: result.blocks,
         isVisible: true,
         staleCount,
+        targetLang: association.targetLang,
         paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
         toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
         isTranslating: false,
@@ -471,7 +580,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       } else {
         await this.diagnostics.error("translate command failed", this.errorMeta(error));
       }
-      if (this.getCurrentAssociation().sourcePath !== association.sourcePath) {
+      if (!this.isSameAssociation(this.getCurrentAssociation(), association)) {
         return;
       }
       this.renderState = {
@@ -490,7 +599,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
   private cancelCurrentTranslation(): void {
     const association = this.getCurrentAssociation();
-    if (!association.isSupportedSource || !this.translationTasks.cancel(association.sourcePath)) {
+    if (!association.isSupportedSource || !this.translationTasks.cancel(association.cacheTargetPath)) {
       return;
     }
     this.renderState = {
@@ -571,7 +680,14 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
   private getCurrentAssociation() {
     const activePath = this.pluginApp.workspace.activeFile ?? this.pluginApp.workspace.activeMarkdownFile?.path;
     const normalized = activePath ? activePath.replace(/\//g, corePath.sep) : null;
-    return this.associationService.resolve(normalized);
+    return this.associationService.resolve(normalized, this.getRuntimeSettings().targetLang);
+  }
+
+  private isSameAssociation(
+    left: { sourcePath: string; cacheTargetPath: string },
+    right: { sourcePath: string; cacheTargetPath: string }
+  ): boolean {
+    return left.sourcePath === right.sourcePath && left.cacheTargetPath === right.cacheTargetPath;
   }
 
   private async readCurrentMarkdown(sourcePath: string): Promise<string> {
@@ -602,13 +718,19 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     return value === "collapsed" ? "collapsed" : "compact";
   }
 
+  private normalizeCredentialStorageMode(value: unknown): CredentialStorageMode {
+    return value === "plugin-settings" ? "plugin-settings" : "session";
+  }
+
   private getRuntimeSettingsSummary(): Record<string, unknown> {
     const settings = this.getRuntimeSettings();
     return {
       endpoint: describeEndpointForDiagnostics(settings.baseUrl),
-      apiKeyConfigured: !!settings.apiKey,
+      translationConfigured: Boolean(settings.baseUrl && settings.apiKey && settings.model),
       model: settings.model,
       timeoutMs: settings.timeoutMs,
+      targetLang: settings.targetLang,
+      retentionMode: settings.credentialStorageMode,
       paneWidthPercent: settings.paneWidthPercent,
       toolbarDisplayMode: settings.toolbarDisplayMode
     };
@@ -738,14 +860,74 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
     });
 
     const settings = this.pluginInstance.getRuntimeSettings();
-    this.addSettingInput("baseUrl", "OpenAI 兼容接口基础地址，例如 https://host/v1。更换服务来源会清除当前会话 API key。", settings.baseUrl, async (value) => {
+    this.addSetting((setting: SettingItem) => {
+      setting.addName("目标语言");
+      setting.addDescription("切换后读取对应语言的独立缓存，不会自动发送翻译请求。");
+      setting.addSelect((select) => {
+        for (const language of TARGET_LANGUAGES) {
+          const option = document.createElement("option");
+          option.value = language.code;
+          option.textContent = language.label;
+          select.appendChild(option);
+        }
+        select.value = settings.targetLang;
+        select.addEventListener("change", () => {
+          void this.pluginInstance
+            .updateSetting("targetLang", select.value as TargetLanguage)
+            .then(() => this.onshow())
+            .catch((error) => {
+              window.alert(error instanceof Error ? error.message : String(error));
+              this.onshow();
+            });
+        });
+      });
+    });
+
+    this.addSettingInput("baseUrl", "OpenAI 兼容接口基础地址，例如 https://host/v1。更换服务来源会清除当前会话和已保存的 API key。", settings.baseUrl, async (value) => {
       await this.pluginInstance.updateSetting("baseUrl", value.trim());
       this.onshow();
     });
 
-    this.addSettingInput("apiKey", "仅保留在当前 Typora 会话中；重启后需要重新输入，不会写入插件设置文件。", settings.apiKey, async (value) => {
+    this.addSetting((setting: SettingItem) => {
+      setting.addName("API key 保存方式");
+      setting.addDescription("默认会话模式不落盘；明文模式可跨重启和覆盖安装，但同一 Windows 用户下的其他程序可以读取。");
+      setting.addSelect((select) => {
+        const options: Array<[CredentialStorageMode, string]> = [
+          ["session", "仅当前 Typora 会话"],
+          ["plugin-settings", "保存在插件设置中（明文）"]
+        ];
+        for (const [value, label] of options) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        }
+        select.value = settings.credentialStorageMode;
+        select.addEventListener("change", () => {
+          void this.pluginInstance
+            .updateSetting("credentialStorageMode", select.value as CredentialStorageMode)
+            .then(() => this.onshow())
+            .catch((error) => {
+              window.alert(error instanceof Error ? error.message : String(error));
+              this.onshow();
+            });
+        });
+      });
+    });
+
+    this.addSettingInput("apiKey", this.pluginInstance.credentialStatusDescription, "", async (value) => {
       await this.pluginInstance.updateSetting("apiKey", value.trim());
+      this.onshow();
     }, "password");
+
+    this.addSetting((setting: SettingItem) => {
+      setting.addName("API key 管理");
+      setting.addDescription("同时删除当前会话 key 和插件设置中已保存的 key。");
+      setting.addButton((button) => {
+        button.textContent = "删除 API key";
+        button.addEventListener("click", () => void this.runSettingAction(button, () => this.pluginInstance.clearApiKey()));
+      });
+    });
 
     this.addSettingInput("model", "OpenAI 兼容模型名。", settings.model, async (value) => {
       await this.pluginInstance.updateSetting("model", value.trim());
@@ -785,7 +967,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       setting.addButton((button) => {
         button.textContent = "清理全部缓存";
         button.addEventListener("click", () => {
-          if (window.confirm("确定清理 Typora Side-by-Side Translator 的全部缓存译文和映射吗？导出的 .zh.md 不受影响。")) {
+          if (window.confirm("确定清理 Typora Side-by-Side Translator 的全部缓存译文和映射吗？已导出的译文文件不受影响。")) {
             void this.runSettingAction(button, () => this.pluginInstance.clearAllCaches());
           }
         });

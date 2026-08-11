@@ -1,16 +1,18 @@
 import { path } from "@typora-community-plugin/core";
-import { FileAssociation } from "../types";
+import { FileAssociation, TargetLanguage } from "../types";
+import { getTargetLanguageDefinition } from "../translation/TargetLanguage";
 
 export class FileAssociationService {
   public constructor(private readonly cacheRootDir: string) {}
 
-  public resolve(sourcePath: string | null | undefined): FileAssociation {
+  public resolve(sourcePath: string | null | undefined, targetLang: TargetLanguage): FileAssociation {
     if (!sourcePath) {
       return {
         sourcePath: "",
         cacheTargetPath: "",
         cacheMapPath: "",
         exportTargetPath: "",
+        targetLang,
         isSupportedSource: false,
         reason: "当前没有已保存的本地 Markdown 文件。"
       };
@@ -24,30 +26,22 @@ export class FileAssociationService {
         cacheTargetPath: "",
         cacheMapPath: "",
         exportTargetPath: "",
+        targetLang,
         isSupportedSource: false,
         reason: "仅支持已保存的本地 .md 文件。"
       };
     }
 
-    if (/\.zh\.md$/i.test(normalized)) {
-      return {
-        sourcePath: normalized,
-        cacheTargetPath: "",
-        cacheMapPath: "",
-        exportTargetPath: "",
-        isSupportedSource: false,
-        reason: "当前文件已是译文文件，插件不会对 .zh.md 再进入双语流程。"
-      };
-    }
-
     const basename = path.basename(normalized, ".md");
+    const suffix = getTargetLanguageDefinition(targetLang).fileSuffix;
     const readableKey = this.createReadableKey(normalized);
     const cacheDirectory = path.join(this.cacheRootDir, readableKey);
     return {
       sourcePath: normalized,
-      cacheTargetPath: path.join(cacheDirectory, `${basename}.zh.md`),
-      cacheMapPath: path.join(cacheDirectory, `${basename}.zh.map.json`),
-      exportTargetPath: path.join(path.dirname(normalized), `${basename}.zh.md`),
+      cacheTargetPath: path.join(cacheDirectory, `${basename}.${suffix}.md`),
+      cacheMapPath: path.join(cacheDirectory, `${basename}.${suffix}.map.json`),
+      exportTargetPath: path.join(path.dirname(normalized), `${basename}.${suffix}.md`),
+      targetLang,
       isSupportedSource: true
     };
   }

@@ -9,6 +9,9 @@ export type TranslationBlockType =
   | "math"
   | "passthrough";
 
+export type TargetLanguage = "zh-CN" | "zh-TW" | "en" | "ja" | "ko";
+export type CredentialStorageMode = "session" | "plugin-settings";
+
 export interface TranslationBlock {
   id: string;
   type: TranslationBlockType;
@@ -38,7 +41,7 @@ export interface TranslationMap {
   cacheGeneration?: string;
   sourcePath: string;
   targetPath: string;
-  targetLang: "zh-CN";
+  targetLang: TargetLanguage;
   provider: "openai-compatible";
   model: string;
   updatedAt: string;
@@ -50,6 +53,9 @@ export interface PluginSettingsData {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  targetLang: TargetLanguage;
+  credentialStorageMode: CredentialStorageMode;
+  storedApiKey: string;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
 }
@@ -59,6 +65,7 @@ export interface FileAssociation {
   cacheTargetPath: string;
   cacheMapPath: string;
   exportTargetPath: string;
+  targetLang: TargetLanguage;
   isSupportedSource: boolean;
   reason?: string;
 }
@@ -89,6 +96,7 @@ export interface PaneRenderState {
   blocks: TranslationBlock[];
   isVisible: boolean;
   staleCount: number;
+  targetLang: TargetLanguage;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
   isTranslating: boolean;

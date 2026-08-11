@@ -22,15 +22,15 @@ npm run check
 - `build/typora-side-by-side-translator/manifest.json` 存在
 - `build/typora-side-by-side-translator/style.css` 存在
 - 严格类型检查通过
-- 运行时安全、增量翻译、Markdown/导出、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 45 项
+- 运行时安全、多语言隔离、增量翻译、Markdown/导出、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 49 项
 - 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
 
 版本候选验证：
 
 ```powershell
-npm run version:set -- 0.1.0-alpha.2
+npm run version:set -- 0.1.0-alpha.3
 npm run ci
-$env:RELEASE_TAG = "0.1.0-alpha.2"
+$env:RELEASE_TAG = "0.1.0-alpha.3"
 npm run check:release
 ```
 
@@ -39,7 +39,7 @@ npm run check:release
 发布后远程验证：
 
 ```powershell
-npm run check:published -- --version 0.1.0-alpha.2
+npm run check:published -- --version 0.1.0-alpha.3
 ```
 
 该命令检查 GitHub Release 状态、四个发布资产、每个资产的 SHA-256、ZIP 根目录、插件 ID 和安装版本。正式版本还会验证 GitHub `latest` 指向该版本。
@@ -71,12 +71,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 中间版本 `eleef.typora-side-by-side-translation` 和更早版本的代码目录被安全移除
 - 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` SHA-256 分别一致
 - 完整 `doctor` 确认最低版本门槛、已验证组合和插件启动日志标记
-- 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.2`，并与本轮构建一致
+- 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.3`，并与本轮构建一致
 
 重启 Typora 后继续确认：
 
 - Installed Plugins 显示 **Typora Side-by-Side Translator**
-- 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.2**
+- 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.3**
 - 命令面板显示新名称下的 5 个命令，包括 `Cancel Translation`
 - 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
 
@@ -125,13 +125,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 ### 2. 首次全文翻译
 
-1. 配置 `baseUrl/apiKey/model`
+1. 配置目标语言和 `baseUrl/apiKey/model`
 2. 执行 `Typora Side-by-Side Translator: Translate Current File`
 
 期望：
 
-- 原文目录下不生成 `.zh.md` / `.zh.map.json`
-- 插件缓存区生成缓存译文和 map
+- 原文目录下不生成目标语言对应的译文或 map
+- 插件缓存区生成目标语言独立的缓存译文和 map
 - 右侧渲染译文内容
 
 ### 2.1 取消与重复任务
@@ -153,8 +153,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 期望：
 
-- 原文目录下生成 `.zh.md`
-- 导出的 `.zh.md` 中不包含 `typora-side-by-side:block-*` 或旧版 `typora-bilingual:block-*` 注释
+- 原文目录下生成当前目标语言对应的 `.zh.md`、`.zh-TW.md`、`.en.md`、`.ja.md` 或 `.ko.md`
+- 导出的 Markdown 中不包含 `typora-side-by-side:block-*` 或旧版 `typora-bilingual:block-*` 注释
 - 标题、列表、引用、代码块、公式、表格结构可正常阅读
 
 ### 4. 脏区刷新
@@ -183,7 +183,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 1. 打开 `fixtures/fixture-manual-edit.md`
 2. 执行全文翻译
-3. 在设置页找到翻译缓存目录，手工修改当前缓存 `.zh.md` 中某一控制块的译文正文
+3. 在设置页找到翻译缓存目录，手工修改当前语言缓存 Markdown 中某一控制块的译文正文
 4. 回到原文，修改对应原文块
 5. 执行 `Refresh Stale Blocks`
 
@@ -244,18 +244,38 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 本机回环地址的 HTTP 可以保存
 - 用户名、密码、查询参数和页面锚点被拒绝
 
-### 10. 会话级 API Key
+### 10. API Key 保存与恢复
 
 1. 先配置 `baseUrl`，再输入 API key
 2. 关闭并重新打开设置页，确认当前会话仍可使用
-3. 将 `baseUrl` 改到另一个域名
-4. 重启 Typora
+3. 保持“仅当前 Typora 会话”并重启 Typora
+4. 再输入测试 key，选择“保存在插件设置中（明文）”，完全退出并重启 Typora
+5. 将 `baseUrl` 改到另一个域名
+6. 点击“删除 API key”
 
 期望：
 
-- 不同服务来源不能复用旧 key
-- 重启后 API key 为空，需要重新输入
+- 会话模式重启后 API key 为空，需要重新输入
+- 插件设置模式重启后显示已恢复状态，且可以继续发起明确授权的翻译请求
+- 不同服务来源不能复用旧 key；更换来源会同时清除内存和已保存 key
+- 删除操作同时清除当前会话 key 和已保存 key
 - 插件设置文件中 `apiKey` 始终为空字符串
+- 只有主动选择插件设置模式时，设置文件中的 `storedApiKey` 才包含明文测试 key；默认会话模式下该字段为空
+
+### 10.1 目标语言与缓存隔离
+
+1. 依次选择简体中文、繁体中文、English、日本語和 한국어
+2. 每次切换后先确认没有自动网络请求，再执行全文翻译
+3. 切回已翻译过的语言
+4. 分别导出各语言译文
+
+期望：
+
+- 设置页和右侧工具栏都能切换五种目标语言
+- 切换语言只读取对应缓存，不会自动翻译
+- 各语言使用独立缓存与 map，互不覆盖
+- 切回已翻译语言后直接显示其已有缓存
+- 导出后缀分别为 `.zh.md`、`.zh-TW.md`、`.en.md`、`.ja.md` 和 `.ko.md`
 
 ### 11. Map 摘要、块标识与旧格式迁移
 
@@ -283,7 +303,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 期望：
 
-- 当前文档清理不影响其他缓存和已导出的 `.zh.md`
+- 当前文档清理不影响其他语言缓存和已导出的译文 Markdown
 - 全部清理只删除插件翻译缓存
 - 日志和轮转备份均被删除
 - 日志中不出现 API key、完整本地路径或带查询参数的服务地址
@@ -293,4 +313,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 当前共享滚动依赖块级最小高度对齐，属于可读同步，不是像素级双编辑器对齐
 - 当前右栏渲染使用 `markdown-it`，视觉上不会完全等同 Typora 原生渲染
 - 当前右栏缓存文件保留内部控制注释，仅导出文件为纯净 Markdown
-- 当前没有可确认的宿主系统凭据 API，API key 采用会话级存储，重启后需重新输入
+- 当前 Typora 社区插件宿主没有可用的系统安全凭据桥；跨重启保存只能由用户主动接受明文插件设置模式，默认必须保持会话模式

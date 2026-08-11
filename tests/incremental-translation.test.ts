@@ -24,6 +24,9 @@ const TRANSLATION_SETTINGS: PluginSettingsData = {
   apiKey: "session-secret",
   model: "test-model",
   timeoutMs: 1000,
+  targetLang: "zh-CN",
+  credentialStorageMode: "session",
+  storedApiKey: "",
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact"
 };
@@ -32,6 +35,7 @@ const ASSOCIATION: FileAssociation = {
   cacheTargetPath: "/cache/article.zh.md",
   cacheMapPath: "/cache/article.zh.map.json",
   exportTargetPath: "/source/article.zh.md",
+  targetLang: "zh-CN",
   isSupportedSource: true
 };
 
@@ -197,6 +201,30 @@ test("request batching enforces block and character limits", () => {
   ];
   assert.deepEqual(planner.batch(longRequests).map((batch) => batch.length), [1, 1]);
   assert.deepEqual(planner.batch([{ id: "oversized", sourceMarkdown: "x".repeat(6001) }]).map((batch) => batch.length), [1]);
+});
+
+test("translation refuses to write a cache for a different target language", async () => {
+  let providerCalls = 0;
+  const storage = createMemoryStorage([]);
+  const orchestrator = new TranslationOrchestrator(createProvider(() => providerCalls += 1), storage.adapter, {
+    dirname(targetPath) {
+      return targetPath.slice(0, targetPath.lastIndexOf("/")) || "/";
+    }
+  });
+  const authorizer = new ExplicitTranslationAuthorizer();
+
+  await assert.rejects(
+    orchestrator.translate(
+      ASSOCIATION,
+      BEFORE_MARKDOWN,
+      { ...TRANSLATION_SETTINGS, targetLang: "ja" },
+      "full",
+      authorizer.authorize("translate-current-file")
+    ),
+    /目标语言与缓存关联不一致/
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(storage.writes.length, 0);
 });
 
 test("stale translation preserves an intentionally empty manual translation", async () => {

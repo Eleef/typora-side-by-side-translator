@@ -24,12 +24,20 @@ import {
 } from "../src/translation/TranslationIntegrity";
 import { TranslationMap } from "../src/types";
 import { TranslationCancelledError } from "../src/translation/TranslationTaskCoordinator";
+import {
+  getTargetLanguageDefinition,
+  normalizeTargetLanguage,
+  TARGET_LANGUAGES
+} from "../src/translation/TargetLanguage";
 
 const TRANSLATION_SETTINGS = {
   baseUrl: "https://api.example.com/v1",
   apiKey: "session-secret",
   model: "test-model",
   timeoutMs: 1000,
+  targetLang: "zh-CN" as const,
+  credentialStorageMode: "session" as const,
+  storedApiKey: "",
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact" as const
 };
@@ -94,6 +102,7 @@ test("remote endpoints require HTTPS while loopback HTTP remains available", () 
 test("diagnostics redact credentials, local paths and URL details", () => {
   const sanitized = sanitizeDiagnosticMeta({
     apiKey: "sk-secret-value",
+    storedApiKey: "plain-saved-value",
     authorization: "Bearer private-token",
     sourcePath: "C:\\Users\\alice\\private\\article.md",
     baseUrl: "https://api.example.com/v1?token=private",
@@ -101,6 +110,7 @@ test("diagnostics redact credentials, local paths and URL details", () => {
   }) as Record<string, unknown>;
 
   assert.equal(sanitized.apiKey, "<redacted>");
+  assert.equal(sanitized.storedApiKey, "<redacted>");
   assert.equal(sanitized.authorization, "<redacted>");
   assert.equal(sanitized.sourcePath, "<local-path>");
   assert.equal(sanitized.baseUrl, "https://api.example.com");
@@ -117,6 +127,17 @@ test("session credentials are scoped to one endpoint origin", () => {
   credentials.clearIfEndpointChanged("https://another.example.com/v1");
   assert.equal(credentials.get("https://api.example.com/v1"), "");
   assert.throws(() => credentials.set("", "secret-key"), /先配置 baseUrl/);
+});
+
+test("target languages use a fixed allowlist and stable export suffixes", () => {
+  assert.deepEqual(
+    TARGET_LANGUAGES.map((language) => language.code),
+    ["zh-CN", "zh-TW", "en", "ja", "ko"]
+  );
+  assert.equal(getTargetLanguageDefinition("zh-CN").fileSuffix, "zh");
+  assert.equal(getTargetLanguageDefinition("zh-TW").fileSuffix, "zh-TW");
+  assert.equal(getTargetLanguageDefinition("ja").promptName, "Japanese");
+  assert.equal(normalizeTargetLanguage("unsupported"), "zh-CN");
 });
 
 test("translation network authorization cannot be replaced by a plain object", () => {
@@ -149,6 +170,9 @@ test("translation provider rejects implicit requests before fetch", async () => 
           apiKey: "session-secret",
           model: "test-model",
           timeoutMs: 1000,
+          targetLang: "zh-CN",
+          credentialStorageMode: "session",
+          storedApiKey: "",
           paneWidthPercent: 50,
           toolbarDisplayMode: "compact"
         },
@@ -182,6 +206,32 @@ test("translation provider rejects missing credentials before fetch", async () =
     /填写 baseUrl、apiKey 和 model/
   );
   assert.equal(fetchCalls, 0);
+});
+
+test("translation provider sends the selected target language in the prompt and payload", async () => {
+  const authorizer = new ExplicitTranslationAuthorizer();
+  let requestBody = "";
+  const provider = new OpenAICompatibleProvider(
+    authorizer,
+    createRuntime(async (_input, init) => {
+      requestBody = String(init?.body ?? "");
+      return createApiResponse('{"blocks":[{"id":"block-1","translatedMarkdown":"こんにちは"}]}');
+    })
+  );
+
+  await provider.translateBlocks(
+    { ...TRANSLATION_SETTINGS, targetLang: "ja" },
+    TRANSLATION_BLOCKS,
+    authorizer.authorize("translate-current-file")
+  );
+
+  const payload = JSON.parse(requestBody) as { messages: Array<{ role: string; content: string }> };
+  const systemPrompt = payload.messages.find((message) => message.role === "system")?.content ?? "";
+  const userPayload = JSON.parse(payload.messages.find((message) => message.role === "user")?.content ?? "{}") as {
+    targetLang?: string;
+  };
+  assert.match(systemPrompt, /Japanese.*ja/);
+  assert.equal(userPayload.targetLang, "ja");
 });
 
 test("translation provider aborts timed out requests and retries twice", async () => {
@@ -485,6 +535,7 @@ test("cache maintenance measures text files and removes only the selected cache 
     cacheTargetPath: "/cache/doc/article.zh.md",
     cacheMapPath: "/cache/doc/article.zh.map.json",
     exportTargetPath: "/source/article.zh.md",
+    targetLang: "zh-CN",
     isSupportedSource: true
   });
   assert.deepEqual(removed, ["/cache/doc"]);

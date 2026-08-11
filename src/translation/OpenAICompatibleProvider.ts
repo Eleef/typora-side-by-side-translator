@@ -3,6 +3,7 @@ import { normalizeAndValidateBaseUrl } from "../security/EndpointPolicy";
 import { delay } from "../utils";
 import { ExplicitTranslationAuthorization, ExplicitTranslationAuthorizer } from "./ExplicitTranslationAuthorizer";
 import { MarkdownStructureProtector, ProtectedMarkdown } from "./MarkdownStructureProtector";
+import { getTargetLanguageDefinition } from "./TargetLanguage";
 import { throwIfTranslationCancelled } from "./TranslationTaskCoordinator";
 
 export const MAX_TRANSLATION_RESPONSE_CHARS = 4_000_000;
@@ -32,14 +33,18 @@ const DEFAULT_RUNTIME: TranslationProviderRuntime = {
   random: Math.random
 };
 
-const SYSTEM_PROMPT = [
-  "你是 Markdown 文档翻译引擎。",
-  "目标语言固定为简体中文。",
-  "保持 Markdown 结构，不要输出任何解释。",
-  "所有 TYPORASIDEBYSIDEPROTECTED...TOKEN 标记必须原样保留且各出现一次。",
-  "保留链接 URL、代码、数学公式、HTML 原样。",
-  "只返回 JSON，格式为 {\"blocks\":[{\"id\":\"...\",\"translatedMarkdown\":\"...\"}]}。"
-].join("\n");
+function buildSystemPrompt(settings: PluginSettingsData): string {
+  const language = getTargetLanguageDefinition(settings.targetLang);
+  return [
+    "你是 Markdown 文档翻译引擎。",
+    `将可翻译内容翻译为 ${language.promptName}（${language.code}）。`,
+    "自动识别源语言；如果内容已经是目标语言，保持原意和自然表达，不要添加说明。",
+    "保持 Markdown 结构，不要输出任何解释。",
+    "所有 TYPORASIDEBYSIDEPROTECTED...TOKEN 标记必须原样保留且各出现一次。",
+    "保留链接 URL、代码、数学公式、HTML 原样。",
+    "只返回 JSON，格式为 {\"blocks\":[{\"id\":\"...\",\"translatedMarkdown\":\"...\"}]}。"
+  ].join("\n");
+}
 
 export class OpenAICompatibleProvider {
   private readonly structureProtector = new MarkdownStructureProtector();
@@ -104,11 +109,11 @@ export class OpenAICompatibleProvider {
             model: settings.model,
             temperature: 0.2,
             messages: [
-              { role: "system", content: SYSTEM_PROMPT },
+              { role: "system", content: buildSystemPrompt(settings) },
               {
                 role: "user",
                 content: JSON.stringify({
-                  targetLang: "zh-CN",
+                  targetLang: settings.targetLang,
                   blocks: protectedBlocks.map((item) => item.request)
                 })
               }

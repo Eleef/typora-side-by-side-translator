@@ -1,8 +1,8 @@
 {
   "name": "typora-side-by-side-translator",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
-  "description": "Side-by-side Markdown translator for Typora with incremental refresh and clean export",
+  "description": "Multilingual side-by-side Markdown translator for Typora with incremental refresh and clean export",
   "main": "dist/main.js",
   "license": "MIT",
   "author": "Eleef",

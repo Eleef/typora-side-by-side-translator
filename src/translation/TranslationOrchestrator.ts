@@ -93,7 +93,7 @@ export class TranslationOrchestrator {
       if (!usesTranslationDigests(parsedMap)) {
         normalizedTarget = normalizeLineEndings(await this.storage.readText(association.cacheTargetPath));
       }
-      this.validateCachePair(map, normalizedTarget);
+      this.validateCachePair(map, normalizedTarget, association);
       return { map, targetMarkdown: normalizedTarget, status: "valid" };
     } catch {
       return { map: null, targetMarkdown: normalizedTarget, status: "invalid" };
@@ -148,6 +148,9 @@ export class TranslationOrchestrator {
     signal?: AbortSignal
   ): Promise<TranslationResult> {
     throwIfTranslationCancelled(signal);
+    if (settings.targetLang !== association.targetLang) {
+      throw new Error("当前目标语言与缓存关联不一致，请重新选择目标语言后再翻译。");
+    }
     const blocks = await this.extractor.extract(sourceMarkdown);
     const existing = await this.loadExistingState(association);
     if (mode === "stale" && (existing.status === "incomplete" || existing.status === "invalid")) {
@@ -307,7 +310,7 @@ export class TranslationOrchestrator {
       cacheGeneration: generation,
       sourcePath: association.sourcePath,
       targetPath: association.cacheTargetPath,
-      targetLang: "zh-CN",
+      targetLang: association.targetLang,
       provider: "openai-compatible",
       model: settings.model,
       updatedAt: new Date().toISOString(),
@@ -315,7 +318,10 @@ export class TranslationOrchestrator {
     };
   }
 
-  private validateCachePair(map: TranslationMap, targetMarkdown: string): void {
+  private validateCachePair(map: TranslationMap, targetMarkdown: string, association: FileAssociation): void {
+    if (map.targetLang !== association.targetLang) {
+      throw new Error("缓存映射的目标语言与当前语言不一致。");
+    }
     if (!Array.isArray(map.blocks)) {
       throw new Error("缓存映射缺少 blocks 数组。");
     }
@@ -402,7 +408,7 @@ export class TranslationOrchestrator {
         this.storage.readText(mapTemp)
       ]);
       const parsedMap = JSON.parse(writtenMap) as TranslationMap;
-      this.validateCachePair(parsedMap, normalizeLineEndings(writtenTarget));
+      this.validateCachePair(parsedMap, normalizeLineEndings(writtenTarget), association);
       throwIfTranslationCancelled(signal);
 
       if (await this.storage.exists(association.cacheTargetPath)) {
