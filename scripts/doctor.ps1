@@ -3,7 +3,8 @@ param (
   [string] $Mode = "Installed",
   [Alias("p")]
   [string] $TyporaHome = "",
-  [string] $CommunityRoot = ""
+  [string] $CommunityRoot = "",
+  [switch] $RedactPaths
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,9 +14,23 @@ $legacyPluginIds = @("eleef.typora-side-by-side-translation", "typora-bilingual"
 $failures = [Collections.Generic.List[string]]::new()
 $warnings = [Collections.Generic.List[string]]::new()
 
+function Protect-DoctorMessage {
+  param ([string] $Message)
+  if (-not $RedactPaths) {
+    return $Message
+  }
+  $protected = $Message
+  foreach ($root in @($env:USERPROFILE, $env:APPDATA, $env:LOCALAPPDATA, [IO.Path]::GetTempPath())) {
+    if ($root) {
+      $protected = $protected -replace [Regex]::Escape([IO.Path]::GetFullPath($root).TrimEnd("\")), "<local-path>"
+    }
+  }
+  return $protected -replace '[A-Za-z]:\\[^\r\n,;]+', '<local-path>'
+}
+
 function Write-CheckResult {
   param ([string] $Level, [string] $Code, [string] $Message)
-  Write-Host "[$Level] $Code - $Message"
+  Write-Host "[$Level] $Code - $(Protect-DoctorMessage $Message)"
 }
 
 function Add-Pass {
@@ -206,7 +221,16 @@ if ($loaderConfig) {
 
 if ($Mode -eq "Installed") {
   $pluginRoot = Join-Path $resolvedCommunityRoot "plugins\$pluginId"
-  $requiredPluginFiles = @("manifest.json", "main.js", "style.css")
+  $requiredPluginFiles = @(
+    "manifest.json",
+    "main.js",
+    "style.css",
+    "locales\lang.en.json",
+    "locales\lang.ja.json",
+    "locales\lang.ko.json",
+    "locales\lang.zh-cn.json",
+    "locales\lang.zh-tw.json"
+  )
   foreach ($requiredFile in $requiredPluginFiles) {
     $installedFile = Join-Path $pluginRoot $requiredFile
     if ((Test-Path $installedFile) -and (Get-Item $installedFile).Length -gt 0) {

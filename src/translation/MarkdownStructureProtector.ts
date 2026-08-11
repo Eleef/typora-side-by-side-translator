@@ -5,6 +5,7 @@ import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { UserFacingError } from "../i18n/UserFacingError";
 import { normalizeLineEndings } from "../utils";
 
 interface MutableNode {
@@ -85,31 +86,31 @@ export class MarkdownStructureProtector {
       restoreAndValidate: (translatedMarkdown) => {
         const normalizedTranslation = normalizeLineEndings(translatedMarkdown).trim();
         if (normalizedSource && !normalizedTranslation) {
-          throw new Error("翻译接口返回了空译文，已拒绝覆盖原内容。");
+          throw new UserFacingError("markdownProtectionFailed");
         }
 
         const receivedTokens = normalizedTranslation.match(TOKEN_PATTERN) ?? [];
         for (const { token } of protectedValues) {
           if (receivedTokens.filter((candidate) => candidate === token).length !== 1) {
-            throw new Error("翻译接口修改或丢失了受保护的 Markdown 内容。");
+            throw new UserFacingError("markdownProtectionFailed");
           }
         }
         if (receivedTokens.length !== protectedValues.length) {
-          throw new Error("翻译接口返回了未知的 Markdown 保护标记。");
+          throw new UserFacingError("markdownProtectionFailed");
         }
 
         const translatedTree = this.processor.parse(normalizedTranslation) as Root;
         if (this.tokenContexts(translatedTree as unknown as MutableNode) !== expectedTokenContexts) {
-          throw new Error("翻译接口移动了受保护的 Markdown 内容。");
+          throw new UserFacingError("markdownProtectionFailed");
         }
         if (this.structureSignature(translatedTree as unknown as MutableNode) !== expectedStructure) {
-          throw new Error("翻译接口改变了 Markdown 块结构，已拒绝写入。");
+          throw new UserFacingError("markdownProtectionFailed");
         }
 
         let restored = normalizedTranslation;
         for (const { placeholder, value } of protectedValues) {
           if (!restored.includes(placeholder)) {
-            throw new Error("翻译接口改变了受保护的 Markdown 占位结构。");
+            throw new UserFacingError("markdownProtectionFailed");
           }
           restored = restored.replace(placeholder, value);
         }

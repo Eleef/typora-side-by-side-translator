@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { CacheMaintenanceService } from "../src/cache/CacheMaintenanceService";
+import { createStableCacheKey } from "../src/files/CacheKey";
+import { UserFacingError } from "../src/i18n/UserFacingError";
 import { TRANSLATION_BLOCK_ID_ALGORITHM } from "../src/markdown/BlockIdentity";
 import { sanitizeDiagnosticMeta } from "../src/security/DiagnosticSanitizer";
 import { normalizeAndValidateBaseUrl } from "../src/security/EndpointPolicy";
@@ -36,8 +38,10 @@ const TRANSLATION_SETTINGS = {
   model: "test-model",
   timeoutMs: 1000,
   targetLang: "zh-CN" as const,
+  uiLanguage: "auto" as const,
   credentialStorageMode: "session" as const,
   storedApiKey: "",
+  translationDisclosureAccepted: true,
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact" as const
 };
@@ -94,9 +98,18 @@ test("remote endpoints require HTTPS while loopback HTTP remains available", () 
   assert.equal(normalizeAndValidateBaseUrl("https://api.example.com/v1/"), "https://api.example.com/v1");
   assert.equal(normalizeAndValidateBaseUrl("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434/v1");
   assert.equal(normalizeAndValidateBaseUrl("http://localhost:1234/v1"), "http://localhost:1234/v1");
-  assert.throws(() => normalizeAndValidateBaseUrl("http://api.example.com/v1"), /HTTPS/);
-  assert.throws(() => normalizeAndValidateBaseUrl("https://user:pass@example.com/v1"), /用户名或密码/);
-  assert.throws(() => normalizeAndValidateBaseUrl("https://api.example.com/v1?key=secret"), /查询参数/);
+  assert.throws(
+    () => normalizeAndValidateBaseUrl("http://api.example.com/v1"),
+    (error) => error instanceof UserFacingError && error.code === "insecureRemote"
+  );
+  assert.throws(
+    () => normalizeAndValidateBaseUrl("https://user:pass@example.com/v1"),
+    (error) => error instanceof UserFacingError && error.code === "baseUrlCredentials"
+  );
+  assert.throws(
+    () => normalizeAndValidateBaseUrl("https://api.example.com/v1?key=secret"),
+    (error) => error instanceof UserFacingError && error.code === "baseUrlQuery"
+  );
 });
 
 test("diagnostics redact credentials, local paths and URL details", () => {
@@ -126,7 +139,10 @@ test("session credentials are scoped to one endpoint origin", () => {
   assert.equal(credentials.get("https://another.example.com/v1"), "");
   credentials.clearIfEndpointChanged("https://another.example.com/v1");
   assert.equal(credentials.get("https://api.example.com/v1"), "");
-  assert.throws(() => credentials.set("", "secret-key"), /先配置 baseUrl/);
+  assert.throws(
+    () => credentials.set("", "secret-key"),
+    (error) => error instanceof UserFacingError && error.code === "baseUrlRequiredForKey"
+  );
 });
 
 test("target languages use a fixed allowlist and stable export suffixes", () => {
@@ -147,9 +163,12 @@ test("translation network authorization cannot be replaced by a plain object", (
   assert.doesNotThrow(() => authorizer.assertAuthorized(authorization));
   assert.throws(
     () => authorizer.assertAuthorized({ reason: "translate-current-file" } as typeof authorization),
-    /缺少显式用户授权/
+    (error) => error instanceof UserFacingError && error.code === "authorizationMissing"
   );
-  assert.throws(() => authorizer.assertAuthorized(undefined), /缺少显式用户授权/);
+  assert.throws(
+    () => authorizer.assertAuthorized(undefined),
+    (error) => error instanceof UserFacingError && error.code === "authorizationMissing"
+  );
 });
 
 test("translation provider rejects implicit requests before fetch", async () => {
@@ -171,14 +190,16 @@ test("translation provider rejects implicit requests before fetch", async () => 
           model: "test-model",
           timeoutMs: 1000,
           targetLang: "zh-CN",
+          uiLanguage: "auto",
           credentialStorageMode: "session",
           storedApiKey: "",
+          translationDisclosureAccepted: true,
           paneWidthPercent: 50,
           toolbarDisplayMode: "compact"
         },
         [{ id: "block-1", sourceMarkdown: "Hello" }]
       ),
-      /缺少显式用户授权/
+      (error) => error instanceof UserFacingError && error.code === "authorizationMissing"
     );
     assert.equal(fetchCalls, 0);
   } finally {
@@ -203,7 +224,7 @@ test("translation provider rejects missing credentials before fetch", async () =
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /填写 baseUrl、apiKey 和 model/
+    (error) => error instanceof UserFacingError && error.code === "translationSettingsIncomplete"
   );
   assert.equal(fetchCalls, 0);
 });
@@ -257,7 +278,7 @@ test("translation provider aborts timed out requests and retries twice", async (
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /翻译请求超时/
+    (error) => error instanceof UserFacingError && error.code === "requestTimeout"
   );
   assert.equal(fetchCalls, 3);
 });
@@ -279,7 +300,7 @@ test("translation provider rejects malformed model JSON without retrying", async
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /JSON/
+    (error) => error instanceof UserFacingError && error.code === "responseInvalid"
   );
   assert.equal(fetchCalls, 1);
 });
@@ -302,7 +323,7 @@ test("translation provider rejects oversized model responses without retrying", 
       TRANSLATION_BLOCKS,
       authorizer.authorize("refresh-stale-blocks")
     ),
-    /内容过大/
+    (error) => error instanceof UserFacingError && error.code === "responseTooLarge"
   );
   assert.equal(fetchCalls, 1);
 });
@@ -333,7 +354,7 @@ test("translation provider rejects reserved cache control comments", async () =>
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /保留控制注释/
+    (error) => error instanceof UserFacingError && error.code === "responseBlockInvalid"
   );
   assert.equal(fetchCalls, 1);
 });
@@ -374,7 +395,8 @@ test("translation provider retries rate limits but not authentication errors", a
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /401/
+    (error) =>
+      error instanceof UserFacingError && error.code === "apiStatus" && error.values.status === 401
   );
   assert.equal(authCalls, 1);
 });
@@ -395,7 +417,7 @@ test("translation provider rejects oversized response headers before parsing", a
       TRANSLATION_BLOCKS,
       authorizer.authorize("translate-current-file")
     ),
-    /响应体过大/
+    (error) => error instanceof UserFacingError && error.code === "responseTooLarge"
   );
   assert.equal(fetchCalls, 1);
 });
@@ -438,7 +460,7 @@ test("translation provider restores protected Markdown and rejects changed place
       [{ id: "block-1", sourceMarkdown }],
       authorizer.authorize("translate-current-file")
     ),
-    /保护标记|受保护/
+    (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
   );
 });
 
@@ -496,15 +518,17 @@ test("schema 2 digest maps do not hash existing digests again", async () => {
   assert.equal(await migrateStoredTranslationHash(schemaTwoMap, digest), digest);
 });
 
-test("cache maintenance measures text files and removes only the selected cache directory", async () => {
+test("cache maintenance measures text files and removes only the selected language cache pair", async () => {
   const removed: string[] = [];
   const directories = new Map<string, string[]>([
     ["/cache", ["doc", "root.map.json"]],
-    ["/cache/doc", ["article.zh.md"]]
+    ["/cache/doc", ["article.zh.md", "article.zh.map.json", "article.en.md"]]
   ]);
   const files = new Map<string, string>([
     ["/cache/root.map.json", "{}"],
-    ["/cache/doc/article.zh.md", "译文"]
+    ["/cache/doc/article.zh.md", "译文"],
+    ["/cache/doc/article.zh.map.json", "{}"],
+    ["/cache/doc/article.en.md", "English"]
   ]);
   const fileSystem = {
     async exists(targetPath: string) {
@@ -529,7 +553,7 @@ test("cache maintenance measures text files and removes only the selected cache 
   const service = new CacheMaintenanceService("/cache", fileSystem, path.posix);
   const usage = await service.getUsage();
 
-  assert.deepEqual(usage, { fileCount: 2, byteCount: 8 });
+  assert.deepEqual(usage, { fileCount: 4, byteCount: 17 });
   await service.clearAssociation({
     sourcePath: "/source/article.md",
     cacheTargetPath: "/cache/doc/article.zh.md",
@@ -538,7 +562,21 @@ test("cache maintenance measures text files and removes only the selected cache 
     targetLang: "zh-CN",
     isSupportedSource: true
   });
-  assert.deepEqual(removed, ["/cache/doc"]);
+  assert.deepEqual(removed, ["/cache/doc/article.zh.md", "/cache/doc/article.zh.map.json"]);
+});
+
+test("cache directory keys include a stable hash of the complete normalized source path", () => {
+  const commonTail = "/very/long/shared/path/that/would/previously/collide/article.md";
+  const firstPath = ["", "workspace", "one", "a".repeat(140), commonTail.slice(1)].join("/");
+  const secondPath = ["", "workspace", "two", "b".repeat(140), commonTail.slice(1)].join("/");
+  const windowsPath = ["C:", "Docs", "Article.md"].join("\\");
+  const normalizedWindowsPath = ["c:", "docs", "article.md"].join("/");
+  const first = createStableCacheKey(firstPath, "article");
+  const second = createStableCacheKey(secondPath, "article");
+
+  assert.notEqual(first, second);
+  assert.match(first, /^article-[a-f0-9]{16}$/);
+  assert.equal(createStableCacheKey(windowsPath, "Article"), createStableCacheKey(normalizedWindowsPath, "Article"));
 });
 
 test("committed map fixtures contain digests and portable paths only", () => {

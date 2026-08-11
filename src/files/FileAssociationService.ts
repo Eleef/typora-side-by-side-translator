@@ -1,6 +1,7 @@
 import { path } from "@typora-community-plugin/core";
 import { FileAssociation, TargetLanguage } from "../types";
 import { getTargetLanguageDefinition } from "../translation/TargetLanguage";
+import { createLegacyCacheKey, createStableCacheKey } from "./CacheKey";
 
 export class FileAssociationService {
   public constructor(private readonly cacheRootDir: string) {}
@@ -14,7 +15,7 @@ export class FileAssociationService {
         exportTargetPath: "",
         targetLang,
         isSupportedSource: false,
-        reason: "当前没有已保存的本地 Markdown 文件。"
+        reason: "no-saved-markdown"
       };
     }
 
@@ -28,30 +29,24 @@ export class FileAssociationService {
         exportTargetPath: "",
         targetLang,
         isSupportedSource: false,
-        reason: "仅支持已保存的本地 .md 文件。"
+        reason: "markdown-only"
       };
     }
 
     const basename = path.basename(normalized, ".md");
     const suffix = getTargetLanguageDefinition(targetLang).fileSuffix;
-    const readableKey = this.createReadableKey(normalized);
+    const readableKey = createStableCacheKey(normalized, basename);
     const cacheDirectory = path.join(this.cacheRootDir, readableKey);
+    const legacyCacheDirectory = path.join(this.cacheRootDir, createLegacyCacheKey(normalized));
     return {
       sourcePath: normalized,
       cacheTargetPath: path.join(cacheDirectory, `${basename}.${suffix}.md`),
       cacheMapPath: path.join(cacheDirectory, `${basename}.${suffix}.map.json`),
       exportTargetPath: path.join(path.dirname(normalized), `${basename}.${suffix}.md`),
+      legacyCacheTargetPath: path.join(legacyCacheDirectory, `${basename}.${suffix}.md`),
+      legacyCacheMapPath: path.join(legacyCacheDirectory, `${basename}.${suffix}.map.json`),
       targetLang,
       isSupportedSource: true
     };
-  }
-
-  private createReadableKey(sourcePath: string): string {
-    const sanitized = sourcePath
-      .replace(/[:]/g, "")
-      .replace(/[\\\/]+/g, "__")
-      .replace(/[^\w\-.]+/g, "_")
-      .slice(-120);
-    return sanitized || "untitled";
   }
 }

@@ -10,7 +10,10 @@ export type TranslationBlockType =
   | "passthrough";
 
 export type TargetLanguage = "zh-CN" | "zh-TW" | "en" | "ja" | "ko";
+export type UiLocale = "en" | "zh-CN" | "zh-TW" | "ja" | "ko";
+export type UiLanguage = "auto" | UiLocale;
 export type CredentialStorageMode = "session" | "plugin-settings";
+export type FileAssociationReason = "no-saved-markdown" | "markdown-only";
 
 export interface TranslationBlock {
   id: string;
@@ -54,8 +57,10 @@ export interface PluginSettingsData {
   model: string;
   timeoutMs: number;
   targetLang: TargetLanguage;
+  uiLanguage: UiLanguage;
   credentialStorageMode: CredentialStorageMode;
   storedApiKey: string;
+  translationDisclosureAccepted: boolean;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
 }
@@ -65,9 +70,11 @@ export interface FileAssociation {
   cacheTargetPath: string;
   cacheMapPath: string;
   exportTargetPath: string;
+  legacyCacheTargetPath?: string;
+  legacyCacheMapPath?: string;
   targetLang: TargetLanguage;
   isSupportedSource: boolean;
-  reason?: string;
+  reason?: FileAssociationReason;
 }
 
 export interface TranslationResult {

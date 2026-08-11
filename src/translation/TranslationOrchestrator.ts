@@ -149,12 +149,12 @@ export class TranslationOrchestrator {
   ): Promise<TranslationResult> {
     throwIfTranslationCancelled(signal);
     if (settings.targetLang !== association.targetLang) {
-      throw new Error("当前目标语言与缓存关联不一致，请重新选择目标语言后再翻译。");
+      throw new UserFacingError("cacheLanguageMismatch");
     }
     const blocks = await this.extractor.extract(sourceMarkdown);
     const existing = await this.loadExistingState(association);
     if (mode === "stale" && (existing.status === "incomplete" || existing.status === "invalid")) {
-      throw new Error("翻译缓存或映射文件不完整、损坏或不可读。为保护现有译文，已停止刷新脏区；请先导出或备份缓存，再执行“全文翻译”。");
+      throw new UserFacingError("cacheInvalidRefresh");
     }
     const previousTranslations = this.markdownCodec.parseCache(existing.targetMarkdown);
     const existingMapById = new Map((existing.map?.blocks ?? []).map((block) => [block.id, block]));
@@ -212,7 +212,7 @@ export class TranslationOrchestrator {
     const blocks = await this.extractor.extract(sourceMarkdown);
     const existing = await this.loadExistingState(association);
     if (existing.status !== "valid") {
-      throw new Error("翻译缓存或映射文件不完整、损坏或不可读，已停止导出。");
+      throw new UserFacingError("cacheInvalidExport");
     }
     const translatedBlocks = this.markdownCodec.parseCache(existing.targetMarkdown);
     return this.markdownCodec.buildExport(blocks, translatedBlocks);
@@ -320,27 +320,27 @@ export class TranslationOrchestrator {
 
   private validateCachePair(map: TranslationMap, targetMarkdown: string, association: FileAssociation): void {
     if (map.targetLang !== association.targetLang) {
-      throw new Error("缓存映射的目标语言与当前语言不一致。");
+      throw new UserFacingError("cacheLanguageMismatch");
     }
     if (!Array.isArray(map.blocks)) {
-      throw new Error("缓存映射缺少 blocks 数组。");
+      throw new UserFacingError("cacheInvalid");
     }
     const parsedCache = this.markdownCodec.inspectCache(targetMarkdown);
     if (parsedCache.malformed || parsedCache.duplicateIds.length > 0) {
-      throw new Error("缓存译文包含损坏或重复的控制块。");
+      throw new UserFacingError("cacheInvalid");
     }
 
     const mapIds = map.blocks.map((block) => block.id);
     if (new Set(mapIds).size !== mapIds.length) {
-      throw new Error("缓存映射包含重复 block。");
+      throw new UserFacingError("cacheInvalid");
     }
     const cacheIds = new Set(parsedCache.blockIds);
     if (mapIds.length !== parsedCache.blockIds.length || mapIds.some((id) => !cacheIds.has(id))) {
-      throw new Error("缓存译文与映射文件的 block 集合不一致。");
+      throw new UserFacingError("cacheInvalid");
     }
     if (map.cacheGeneration || parsedCache.generation) {
       if (!map.cacheGeneration || map.cacheGeneration !== parsedCache.generation) {
-        throw new Error("缓存译文与映射文件不是同一批生成结果。");
+        throw new UserFacingError("cacheInvalid");
       }
     }
   }
@@ -445,7 +445,7 @@ export class TranslationOrchestrator {
       } catch (rollbackError) {
         const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         const originalDetail = error instanceof Error ? error.message : String(error);
-        throw new Error(`缓存提交失败，且自动回滚未完成；备份文件已保留。原错误：${originalDetail}；回滚错误：${detail}`);
+        throw new UserFacingError("cacheCommitRollback", { original: originalDetail, rollback: detail });
       }
       throw error;
     } finally {
@@ -466,3 +466,4 @@ export class TranslationOrchestrator {
     }
   }
 }
+import { UserFacingError } from "../i18n/UserFacingError";

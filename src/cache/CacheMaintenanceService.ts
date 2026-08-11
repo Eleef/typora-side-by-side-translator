@@ -36,12 +36,21 @@ export class CacheMaintenanceService {
   }
 
   public async clearAssociation(association: FileAssociation): Promise<void> {
-    if (!association.cacheTargetPath) {
-      return;
+    for (const targetPath of [
+      association.cacheTargetPath,
+      association.cacheMapPath,
+      association.legacyCacheTargetPath,
+      association.legacyCacheMapPath
+    ]) {
+      if (targetPath && (await this.fileSystem.exists(targetPath))) {
+        await this.fileSystem.remove(targetPath);
+      }
     }
-    const cacheDirectory = this.pathAdapter.dirname(association.cacheTargetPath);
-    if (await this.fileSystem.exists(cacheDirectory)) {
-      await this.fileSystem.remove(cacheDirectory);
+  }
+
+  public async eraseAll(): Promise<void> {
+    if (await this.fileSystem.exists(this.cacheRootDir)) {
+      await this.fileSystem.remove(this.cacheRootDir);
     }
   }
 

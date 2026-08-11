@@ -6,7 +6,16 @@ const workspace = path.resolve(__dirname, "..");
 const buildDir = path.join(workspace, "build", "typora-side-by-side-translator");
 const releaseDir = path.join(workspace, "release");
 const zipPath = path.join(releaseDir, "plugin.zip");
-const packageFiles = ["manifest.json", "main.js", "style.css"];
+const packageFiles = [
+  "manifest.json",
+  "main.js",
+  "style.css",
+  "locales/lang.en.json",
+  "locales/lang.ja.json",
+  "locales/lang.ko.json",
+  "locales/lang.zh-cn.json",
+  "locales/lang.zh-tw.json"
+];
 const stableArchiveDate = new Date("1980-01-01T00:00:00.000Z");
 
 for (const filename of packageFiles) {

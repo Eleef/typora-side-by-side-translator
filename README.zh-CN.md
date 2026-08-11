@@ -16,6 +16,7 @@
 - **只在明确操作后翻译。** 输入时不会发送请求，全文翻译和脏区刷新都需要用户主动执行。
 - **不污染原文目录。** 每种目标语言使用独立插件缓存，只有主动导出时才生成带语言后缀的干净 Markdown。
 - **可选择目标语言。** 设置页和译文窗格都支持简体中文、繁体中文、英文、日文和韩文。
+- **可选择插件界面语言。** 界面可自动跟随 Typora，也可独立选择英文、简体中文、繁体中文、日文或韩文，不与翻译目标语言绑定。
 - **只更新发生变化的内容。** 插件按 Markdown 块跟踪变化，并保护人工修改过的缓存译文，避免被静默覆盖。
 - **尽量保留 Markdown 结构。** 标题、段落、列表、引用、表格、链接、代码、公式和 HTML 使用各自的处理规则。
 - **按一篇文档连续阅读。** 两栏共享 Typora 主滚动区域，并支持拖拽及 `40/60`、`50/50`、`60/40` 比例。
@@ -33,9 +34,9 @@
 
 Manifest 的最低门槛为 Typora `1.12.4` 和社区核心 `2.5.28`，但这不代表所有更高版本组合都已验证。当前不支持 macOS 和 Linux。
 
-### 安装 Alpha 发布包
+### 安装已发布的 Alpha 包
 
-先安装 `typora-community-plugin`，然后从 [`0.1.0-alpha.3` Release](https://github.com/Eleef/typora-side-by-side-translator/releases/tag/0.1.0-alpha.3) 下载以下四个文件，并放在同一目录：
+先安装 `typora-community-plugin`，打开 [Releases 页面](https://github.com/Eleef/typora-side-by-side-translator/releases)，选择一个已发布版本，并从同一版本下载以下四个文件放在一个目录。仓库源码可能领先于最近发布的 Alpha；验证当前开发版本时请使用下方“从源码安装”。
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
@@ -72,7 +73,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 ### 使用
 
 1. 在 Typora 中打开已保存的本地 `.md` 文件。
-2. 打开社区插件设置，选择目标语言并填写 `baseUrl`、`apiKey`、`model` 和 `timeoutMs`。
+2. 打开社区插件设置，分别选择界面语言和目标语言，再填写 `baseUrl`、`apiKey`、`model` 和 `timeoutMs`。
 3. API key 默认“仅当前 Typora 会话”；若重启便利性高于本机静态保密需求，可明确选择“保存在插件设置中（明文）”。
 4. 打开社区命令面板；在已验证环境中快捷键是 `F2`。
 5. 搜索 **Side-by-Side Translator**，执行 **Toggle Pane**。
@@ -102,16 +103,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 ## 数据安全
 
 - 只有执行 **Translate Current File** 或 **Refresh Stale Blocks** 后才会发送 Markdown。
+- 第一次联网翻译前，插件会显示当前配置的服务并要求用户明确同意发送数据；拒绝后不会发出请求。
 - 请求由 Typora 直接发送到用户配置的服务，本项目不运营中转服务器。
 - 远程地址必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 和 `::1` 可以使用 HTTP。
 - 会话模式是默认值，只在内存中保存 API key。可选的插件设置模式会在当前用户的社区插件数据中明文保存 key；同一 Windows 用户下运行的其他程序可以读取。
 - 更换 API 服务来源会清除内存和已保存的 key；切回会话模式或点击显式删除也会移除已保存值。
-- 覆盖安装插件代码会保留社区插件设置；删除插件的社区数据目录会删除已保存 key。
+- 覆盖安装或卸载插件代码都不会删除社区插件设置、缓存和日志。如需清除本地数据，应在卸载前通过插件设置执行 **清除全部插件本地数据**。
 - 翻译缓存位于 `%USERPROFILE%\.typora\community-plugins\settings\data\eleef.typora-side-by-side-translator\translations`。
-- 设置页可以清理当前文档缓存、全部翻译缓存和诊断日志。
+- **清理当前文档** 只删除当前目标语言的缓存译文和映射。设置页还可以清理全部翻译缓存、诊断日志或全部插件本地数据；已导出的 Markdown 不会被删除。
 - 诊断日志会隐藏凭据、本机路径、网址查询参数和敏感错误详情。
+- 右侧只读窗格会转义 Markdown 原始 HTML，并用严格白名单净化渲染结果；可执行标记和外部资源元素会被移除。
 
-翻译服务会收到本次选择发送的 Markdown 块。处理敏感文档前，应先确认该服务的数据保留和隐私政策。
+翻译服务会收到本次选择发送的 Markdown 块。处理敏感文档前，应先确认该服务的数据保留和隐私政策。已记录的同意状态可随“全部插件本地数据”一起清除。
 
 插件会保守处理旧缓存和损坏缓存。旧块标识格式的缓存仍可读取和导出，但脏区刷新不会覆盖它；缓存译文或映射文件缺失、损坏或不可读时，插件会在网络请求和文件写入前停止。只有用户明确执行全文翻译，才会重建缓存。
 
@@ -133,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 Typora 更新可能替换 `typora-community-plugin` 修改过的应用 HTML，导致插件市场和全部社区插件消失。如果健康检查显示 `community-market.injection` 失败，请完全关闭 Typora，并针对更新后的 Typora 重新安装当前官方社区加载器。不要用旧版 Typora HTML 覆盖新版文件。
 
-提交问题时，请使用仓库中的 Bug 或 Compatibility 表单，并附上健康检查摘要、Typora 版本、社区核心版本和复现步骤。不要提交 API key 或未处理的原始日志。
+提交问题时，请先使用 `-RedactPaths` 重新运行健康检查，再通过仓库中的 Bug 或 Compatibility 表单附上这份脱敏摘要、Typora 版本、社区核心版本和复现步骤。不要提交 API key 或未处理的原始日志。
 
 ## 开发与验证
 
@@ -143,12 +146,12 @@ npm test
 npm run build
 npm run package
 npm run test:windows-installer
-npm run version:set -- 0.1.0-alpha.3
-$env:RELEASE_TAG = "0.1.0-alpha.3"
+npm run version:set -- <version>
+$env:RELEASE_TAG = "<version>"
 npm run check:release
 ```
 
-`npm run package` 会生成 `release/plugin.zip`，其中只包含 `manifest.json`、`main.js` 和 `style.css`。完整真机检查见 [VERIFICATION.md](./VERIFICATION.md)，贡献代码前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，安全问题报告方式见 [SECURITY.md](./SECURITY.md)。
+`npm run package` 当前会生成包含 `manifest.json`、`main.js`、`style.css` 和 `locales/` 目录的 `release/plugin.zip`，五套界面语言资源作为独立文件随包发布。安装器和发布检查会逐个校验这些语言文件。完整真机检查见 [VERIFICATION.md](./VERIFICATION.md)，贡献代码前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，安全问题报告方式见 [SECURITY.md](./SECURITY.md)。
 
 仓库还包含符合 GitHub 社交分享图尺寸的 [social-preview.png](./docs/assets/social-preview.png)，可在仓库设置中直接上传。
 

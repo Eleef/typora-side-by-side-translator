@@ -5,7 +5,16 @@ const { inspectZip } = require("./zip-inspector");
 const { checksumFilename, parseChecksum, releaseFiles, sha256Buffer } = require("./release-checksum");
 
 const workspace = path.resolve(__dirname, "..");
-const expectedEntries = ["main.js", "manifest.json", "style.css"];
+const expectedEntries = [
+  "locales/lang.en.json",
+  "locales/lang.ja.json",
+  "locales/lang.ko.json",
+  "locales/lang.zh-cn.json",
+  "locales/lang.zh-tw.json",
+  "main.js",
+  "manifest.json",
+  "style.css"
+];
 const maximumAssetBytes = 32 * 1024 * 1024;
 
 function assert(condition, message) {

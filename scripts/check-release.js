@@ -8,7 +8,16 @@ const workspace = path.resolve(__dirname, "..");
 const buildDir = path.join(workspace, "build", "typora-side-by-side-translator");
 const zipPath = path.join(workspace, "release", "plugin.zip");
 const checksumPath = path.join(workspace, "release", checksumFilename);
-const expectedEntries = ["main.js", "manifest.json", "style.css"];
+const expectedEntries = [
+  "locales/lang.en.json",
+  "locales/lang.ja.json",
+  "locales/lang.ko.json",
+  "locales/lang.zh-cn.json",
+  "locales/lang.zh-tw.json",
+  "main.js",
+  "manifest.json",
+  "style.css"
+];
 const packageOnly = process.argv.includes("--package-only");
 
 function readJson(filePath) {
@@ -71,7 +80,8 @@ function main() {
   const entries = inspectZip(zipPath);
   const names = entries.map((entry) => entry.name).sort();
   assert(JSON.stringify(names) === JSON.stringify(expectedEntries), `Unexpected ZIP entries: ${names.join(", ")}`);
-  assert(names.every((name) => !name.includes("/") && !name.includes("\\")), "ZIP files must be at the archive root.");
+  assert(names.every((name) => !name.includes("\\")), "ZIP entries must use forward slashes.");
+  assert(names.filter((name) => name.includes("/")).every((name) => name.startsWith("locales/")), "Only locale resources may be nested.");
 
   const zippedManifestEntry = entries.find((entry) => entry.name === "manifest.json");
   assert(zippedManifestEntry, "ZIP manifest is missing.");

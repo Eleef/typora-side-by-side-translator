@@ -32,21 +32,32 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
 
+      - name: Reject an existing release version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists. Publish fixes with a new version." >&2
+            exit 1
+          fi
+
       - name: Create GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Windows Alpha. Requires Typora with typora-community-plugin. Translation requests are only sent after an explicit translate command; API keys remain in the current Typora session. See README and SECURITY.md for installation, privacy boundaries, and known limits."
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            channel="Windows prerelease"
+          else
+            channel="Windows stable release"
+          fi
+          notes="${channel}. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are session-only by default; users may explicitly opt into plaintext plugin-settings storage. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
           args=(--verify-tag --title "${GITHUB_REF_NAME}" --generate-notes --notes "${notes}")
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             args+=(--prerelease)
           fi
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" release/plugin.zip release/SHA256SUMS.txt scripts/install-plugin.ps1 scripts/doctor.ps1 --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" release/plugin.zip release/SHA256SUMS.txt scripts/install-plugin.ps1 scripts/doctor.ps1 "${args[@]}"
-          fi
+          gh release create "${GITHUB_REF_NAME}" release/plugin.zip release/SHA256SUMS.txt scripts/install-plugin.ps1 scripts/doctor.ps1 "${args[@]}"
 
       - name: Verify published release
         env:

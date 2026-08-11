@@ -25,7 +25,7 @@ export class TranslationTaskCoordinator {
 
   public async run<T>(sourcePath: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.activeTasks.has(sourcePath)) {
-      throw new Error("当前文档已有翻译任务正在运行，请等待完成或先取消。");
+      throw new UserFacingError("taskAlreadyRunning");
     }
 
     const controller = new AbortController();
@@ -54,3 +54,4 @@ export class TranslationTaskCoordinator {
     }
   }
 }
+import { UserFacingError } from "../i18n/UserFacingError";

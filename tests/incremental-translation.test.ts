@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BlockExtractionService } from "../src/markdown/BlockExtractionService";
+import { UserFacingError } from "../src/i18n/UserFacingError";
 import { TRANSLATION_BLOCK_ID_ALGORITHM } from "../src/markdown/BlockIdentity";
 import { ExplicitTranslationAuthorizer } from "../src/translation/ExplicitTranslationAuthorizer";
 import { hashTranslation, TRANSLATION_HASH_ALGORITHM, TRANSLATION_MAP_SCHEMA_VERSION } from "../src/translation/TranslationIntegrity";
@@ -25,8 +26,10 @@ const TRANSLATION_SETTINGS: PluginSettingsData = {
   model: "test-model",
   timeoutMs: 1000,
   targetLang: "zh-CN",
+  uiLanguage: "auto",
   credentialStorageMode: "session",
   storedApiKey: "",
+  translationDisclosureAccepted: true,
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact"
 };
@@ -167,7 +170,10 @@ test("stale planning refuses legacy block identities without blocking full trans
   delete legacyMap.blockIdAlgorithm;
   const planner = new TranslationRequestPlanner();
 
-  await assert.rejects(planner.collect(blocks, legacyMap, generated, "stale"), /旧版块标识算法/);
+  await assert.rejects(
+    planner.collect(blocks, legacyMap, generated, "stale"),
+    (error) => error instanceof UserFacingError && error.code === "cacheLegacy"
+  );
   await assert.doesNotReject(planner.collect(blocks, legacyMap, generated, "full"));
 });
 
@@ -183,7 +189,10 @@ test("structural edits with manual translations require an explicit full rebuild
   manuallyEdited.set(before[1].id, "");
   const planner = new TranslationRequestPlanner();
 
-  await assert.rejects(planner.collect(inserted, map, manuallyEdited, "stale"), /结构变化和人工改写译文/);
+  await assert.rejects(
+    planner.collect(inserted, map, manuallyEdited, "stale"),
+    (error) => error instanceof UserFacingError && error.code === "manualStructureConflict"
+  );
   await assert.doesNotReject(planner.collect(inserted, map, generated, "stale"));
 });
 
@@ -221,7 +230,7 @@ test("translation refuses to write a cache for a different target language", asy
       "full",
       authorizer.authorize("translate-current-file")
     ),
-    /目标语言与缓存关联不一致/
+    (error) => error instanceof UserFacingError && error.code === "cacheLanguageMismatch"
   );
   assert.equal(providerCalls, 0);
   assert.equal(storage.writes.length, 0);
@@ -301,7 +310,7 @@ test("stale translation refuses incomplete or invalid caches before network and 
         "stale",
         authorizer.authorize("refresh-stale-blocks")
       ),
-      /不完整、损坏或不可读/,
+      (error) => error instanceof UserFacingError && error.code === "cacheInvalidRefresh",
       name
     );
     assert.equal(providerCalls, 0, name);
@@ -439,7 +448,10 @@ test("translation task coordinator blocks duplicates and propagates cancellation
       })
   );
 
-  await assert.rejects(coordinator.run(ASSOCIATION.sourcePath, async () => undefined), /已有翻译任务/);
+  await assert.rejects(
+    coordinator.run(ASSOCIATION.sourcePath, async () => undefined),
+    (error) => error instanceof UserFacingError && error.code === "taskAlreadyRunning"
+  );
   assert.equal(coordinator.cancel(ASSOCIATION.sourcePath), true);
   await assert.rejects(first, TranslationCancelledError);
   assert.equal(coordinator.isRunning(ASSOCIATION.sourcePath), false);

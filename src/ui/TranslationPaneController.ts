@@ -1,8 +1,10 @@
 import MarkdownIt from "markdown-it";
+import { PluginLocalizer } from "../i18n/PluginLocalizer";
 import { AnchorMappingService } from "../sync/AnchorMappingService";
 import { ScrollSyncService } from "../sync/ScrollSyncService";
-import { PaneRenderState, TargetLanguage, TranslationBlock, TranslationBlockType } from "../types";
-import { getTargetLanguageDefinition, TARGET_LANGUAGES } from "../translation/TargetLanguage";
+import { FileAssociationReason, PaneRenderState, TargetLanguage, TranslationBlock, TranslationBlockType } from "../types";
+import { TARGET_LANGUAGES } from "../translation/TargetLanguage";
+import { createTranslationHtmlSanitizer } from "./TranslationHtmlSanitizer";
 
 interface PaneActions {
   onTranslateAll: () => void;
@@ -18,7 +20,8 @@ type StatusBadgeKind = "idle" | "cached" | "stale" | "error";
 type ToolbarDisplayMode = "compact" | "collapsed";
 
 export class TranslationPaneController {
-  private readonly markdown = new MarkdownIt({ html: true, linkify: true, breaks: false });
+  private readonly markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
+  private readonly sanitizeHtml = createTranslationHtmlSanitizer(window);
   private readonly anchorMapping = new AnchorMappingService();
   private readonly scrollSync = new ScrollSyncService();
   private readonly sourceBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, blockquote, table";
@@ -37,6 +40,39 @@ export class TranslationPaneController {
   private windowResizeHandler: (() => void) | null = null;
   private layoutSyncFrame: number | null = null;
   private toolbarExpanded = false;
+  private currentPaneWidth = 50;
+  private originalParent: HTMLElement | null = null;
+  private originalNextSibling: ChildNode | null = null;
+  private resizeDragCleanup: (() => void) | null = null;
+
+  public constructor(private readonly localizer: PluginLocalizer) {}
+
+  public refreshLocalizedText(): void {
+    if (!this.pane || !this.resizeHandle) {
+      return;
+    }
+    const { pane } = this.localizer.t;
+    this.resizeHandle.title = pane.resizeHandle;
+    const labels: Array<[string, string]> = [
+      ['[data-action="translate-all"]', pane.translateAll],
+      ['[data-action="refresh-stale"]', pane.refreshStale],
+      ['[data-action="cancel-translation"]', pane.cancelTranslation],
+      ['[data-action="export-target"]', pane.exportTarget]
+    ];
+    for (const [selector, label] of labels) {
+      const button = this.pane.querySelector<HTMLButtonElement>(selector);
+      if (button) {
+        button.textContent = label;
+      }
+    }
+    const collapsedToggle = this.pane.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
+    collapsedToggle?.setAttribute("aria-label", pane.openToolbar);
+    const languageSelect = this.pane.querySelector<HTMLSelectElement>('[data-action="target-language"]');
+    languageSelect?.setAttribute("aria-label", pane.targetLanguage);
+    for (const option of Array.from(languageSelect?.options ?? [])) {
+      option.textContent = this.localizer.targetLanguageLabel(option.value as TargetLanguage);
+    }
+  }
 
   public ensureMounted(actions: PaneActions): void {
     if (this.host) {
@@ -46,49 +82,59 @@ export class TranslationPaneController {
 
     const source = this.findSourceContainer();
     if (!source || !source.parentElement) {
-      throw new Error("未找到 Typora 写作区容器，无法挂载译文 pane。");
+      throw new Error(this.localizer.t.pane.mountFailed);
     }
 
     this.actions = actions;
     const originalParent = source.parentElement;
+    const originalNextSibling = source.nextSibling;
     const host = document.createElement("div");
-    host.className = "typora-bilingual-host";
+    host.className = "typora-bilingual-host is-pane-hidden";
     const sourceWrapper = document.createElement("div");
     sourceWrapper.className = "typora-bilingual-source";
     originalParent.insertBefore(host, source);
     sourceWrapper.appendChild(source);
     host.appendChild(sourceWrapper);
+    this.host = host;
+    this.sourceContainer = source;
+    this.originalParent = originalParent;
+    this.originalNextSibling = originalNextSibling;
 
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "typora-bilingual-resizer";
-    resizeHandle.title = "拖拽调整比例，双击恢复 50/50";
+    resizeHandle.setAttribute("role", "separator");
+    resizeHandle.setAttribute("tabindex", "0");
+    resizeHandle.setAttribute("aria-orientation", "vertical");
+    resizeHandle.setAttribute("aria-valuemin", "35");
+    resizeHandle.setAttribute("aria-valuemax", "65");
+    resizeHandle.setAttribute("aria-valuenow", "50");
     host.appendChild(resizeHandle);
 
     const pane = document.createElement("div");
     pane.className = "typora-bilingual-pane is-hidden";
     pane.innerHTML = [
       '<div class="typora-bilingual-pane__overlay">',
-      '  <button class="typora-bilingual-pane__collapsed-toggle" data-action="toggle-toolbar" type="button" aria-label="打开右侧工具栏">译</button>',
+      '  <button class="typora-bilingual-pane__collapsed-toggle" data-action="toggle-toolbar" type="button"></button>',
       '  <div class="typora-bilingual-pane__toolbar">',
       '    <div class="typora-bilingual-pane__actions">',
-      '      <button class="typora-bilingual-pane__button" data-action="translate-all" type="button">全文翻译</button>',
-      '      <button class="typora-bilingual-pane__button" data-action="refresh-stale" type="button">刷新脏区</button>',
-      '      <button class="typora-bilingual-pane__button is-hidden" data-action="cancel-translation" type="button">取消翻译</button>',
-      '      <button class="typora-bilingual-pane__button" data-action="export-target" type="button">导出译文</button>',
+      '      <button class="typora-bilingual-pane__button" data-action="translate-all" type="button"></button>',
+      '      <button class="typora-bilingual-pane__button" data-action="refresh-stale" type="button"></button>',
+      '      <button class="typora-bilingual-pane__button is-hidden" data-action="cancel-translation" type="button"></button>',
+      '      <button class="typora-bilingual-pane__button" data-action="export-target" type="button"></button>',
       "    </div>",
       '    <div class="typora-bilingual-pane__controls-row">',
-      '      <select class="typora-bilingual-pane__language" data-action="target-language" aria-label="目标语言">',
-      ...TARGET_LANGUAGES.map((language) => `        <option value="${language.code}">${language.label}</option>`),
+      '      <select class="typora-bilingual-pane__language" data-action="target-language">',
+      ...TARGET_LANGUAGES.map((language) => `        <option value="${language.code}"></option>`),
       "      </select>",
       '      <div class="typora-bilingual-pane__presets">',
       '        <button class="typora-bilingual-pane__preset" data-preset="60" type="button">40/60</button>',
       '        <button class="typora-bilingual-pane__preset" data-preset="50" type="button">50/50</button>',
       '        <button class="typora-bilingual-pane__preset" data-preset="40" type="button">60/40</button>',
       "      </div>",
-      '      <div class="typora-bilingual-pane__status-badge" data-kind="idle"></div>',
+      '      <div class="typora-bilingual-pane__status-badge" data-kind="idle" role="status" aria-live="polite"></div>',
       "    </div>",
       "  </div>",
-      '  <div class="typora-bilingual-pane__message is-hidden"></div>',
+      '  <div class="typora-bilingual-pane__message is-hidden" role="alert" aria-live="assertive"></div>',
       "</div>",
       '<div class="typora-bilingual-pane__body"></div>'
     ].join("");
@@ -98,7 +144,7 @@ export class TranslationPaneController {
     const messageEl = pane.querySelector<HTMLDivElement>(".typora-bilingual-pane__message");
     const paneBody = pane.querySelector<HTMLDivElement>(".typora-bilingual-pane__body");
     if (!overlayEl || !statusBadgeEl || !messageEl || !paneBody) {
-      throw new Error("译文 pane 初始化失败。");
+      throw new Error(this.localizer.t.pane.initializeFailed);
     }
 
     pane.addEventListener("change", (event) => {
@@ -170,16 +216,58 @@ export class TranslationPaneController {
     this.bindResize(resizeHandle);
 
     host.appendChild(pane);
-    this.host = host;
     this.pane = pane;
     this.paneBody = paneBody;
     this.statusBadgeEl = statusBadgeEl;
     this.messageEl = messageEl;
     this.overlayEl = overlayEl;
-    this.sourceContainer = source;
     this.scrollRoot = this.findScrollRoot(source);
     this.resizeHandle = resizeHandle;
+    this.refreshLocalizedText();
     this.bindSharedResizeObservers();
+  }
+
+  public destroy(): void {
+    this.scrollSync.unbind();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.windowResizeHandler) {
+      window.removeEventListener("resize", this.windowResizeHandler);
+      this.windowResizeHandler = null;
+    }
+    if (this.layoutSyncFrame !== null) {
+      window.cancelAnimationFrame(this.layoutSyncFrame);
+      this.layoutSyncFrame = null;
+    }
+    this.resizeDragCleanup?.();
+    this.resizeDragCleanup = null;
+
+    const source = this.sourceContainer;
+    const originalParent = this.originalParent;
+    if (source && originalParent) {
+      const nextSibling = this.originalNextSibling;
+      if (nextSibling?.parentNode === originalParent) {
+        originalParent.insertBefore(source, nextSibling);
+      } else {
+        originalParent.appendChild(source);
+      }
+    }
+    this.host?.remove();
+
+    this.host = null;
+    this.pane = null;
+    this.paneBody = null;
+    this.statusBadgeEl = null;
+    this.messageEl = null;
+    this.overlayEl = null;
+    this.sourceContainer = null;
+    this.originalParent = null;
+    this.originalNextSibling = null;
+    this.resizeHandle = null;
+    this.actions = null;
+    this.activeBlockId = null;
+    this.toolbarExpanded = false;
+    this.scrollRoot = window;
   }
 
   public render(state: PaneRenderState): void {
@@ -188,6 +276,9 @@ export class TranslationPaneController {
     }
 
     this.host.style.setProperty("--typora-bilingual-pane-width", `${state.paneWidthPercent}%`);
+    this.currentPaneWidth = state.paneWidthPercent;
+    this.resizeHandle?.setAttribute("aria-valuenow", String(state.paneWidthPercent));
+    this.host.classList.toggle("is-pane-hidden", !state.isVisible);
     this.pane.classList.toggle("is-hidden", !state.isVisible);
     if (!state.isVisible) {
       return;
@@ -209,26 +300,28 @@ export class TranslationPaneController {
       languageSelect.disabled = state.isTranslating;
     }
     if (collapsedToggle) {
-      collapsedToggle.textContent = getTargetLanguageDefinition(state.targetLang).shortLabel;
+      collapsedToggle.textContent = this.localizer.targetLanguageShortLabel(state.targetLang);
     }
     if (state.toolbarDisplayMode === "compact") {
       this.toolbarExpanded = true;
     }
     this.syncToolbarMode();
-    const unsupportedReason = !state.association?.isSupportedSource ? state.association?.reason ?? "当前文件不受支持。" : null;
+    const unsupportedReason = !state.association?.isSupportedSource
+      ? this.associationReason(state.association?.reason)
+      : null;
     this.renderStatus(state, unsupportedReason);
     this.renderPresetState(state.paneWidthPercent);
 
     this.paneBody.innerHTML = "";
 
     if (!state.association?.isSupportedSource) {
-      this.paneBody.appendChild(this.createEmptyState(unsupportedReason ?? "当前文件不受支持。"));
+      this.paneBody.appendChild(this.createEmptyState(unsupportedReason ?? this.localizer.t.pane.unsupportedFile));
       this.scheduleLayoutSync();
       return;
     }
 
     if (!state.targetMarkdown) {
-      this.paneBody.appendChild(this.createEmptyState("还没有缓存译文。执行“全文翻译”后会在插件缓存区生成译文。"));
+      this.paneBody.appendChild(this.createEmptyState(this.localizer.t.pane.noCachedTranslation));
       this.scheduleLayoutSync();
       return;
     }
@@ -245,7 +338,7 @@ export class TranslationPaneController {
       if (this.activeBlockId === block.id) {
         blockEl.classList.add("is-active");
       }
-      blockEl.innerHTML = this.markdown.render(markdown);
+      blockEl.innerHTML = this.sanitizeHtml(this.markdown.render(markdown));
       this.paneBody.appendChild(blockEl);
     }
 
@@ -320,6 +413,10 @@ export class TranslationPaneController {
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
 
+      this.resizeDragCleanup?.();
+
+      let cleanup = () => {};
+
       const onMouseMove = (moveEvent: MouseEvent) => {
         const rect = host.getBoundingClientRect();
         if (!rect.width) {
@@ -337,20 +434,45 @@ export class TranslationPaneController {
         const percent = rect.width ? (paneWidth / rect.width) * 100 : 50;
         const clamped = Math.min(65, Math.max(35, Math.round(percent)));
         this.applyPaneWidth(clamped, true);
+        cleanup();
+      };
+
+      cleanup = () => {
         handle.classList.remove("is-active");
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", onMouseUp);
+        if (this.resizeDragCleanup === cleanup) {
+          this.resizeDragCleanup = null;
+        }
       };
 
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
+      this.resizeDragCleanup = cleanup;
     });
 
     handle.addEventListener("dblclick", (event) => {
       event.preventDefault();
       this.applyPaneWidth(50, true);
+    });
+
+    handle.addEventListener("keydown", (event) => {
+      let nextWidth: number | null = null;
+      if (event.key === "ArrowLeft") {
+        nextWidth = this.currentPaneWidth + 2;
+      } else if (event.key === "ArrowRight") {
+        nextWidth = this.currentPaneWidth - 2;
+      } else if (event.key === "Home") {
+        nextWidth = 35;
+      } else if (event.key === "End") {
+        nextWidth = 65;
+      }
+      if (nextWidth !== null) {
+        event.preventDefault();
+        this.applyPaneWidth(nextWidth, true);
+      }
     });
   }
 
@@ -411,18 +533,19 @@ export class TranslationPaneController {
     unsupportedReason: string | null,
     targetName: string
   ): { kind: StatusBadgeKind; label: string; title: string; detail?: string; detailKind?: "warning" | "error" } {
-    const cacheName = targetName || "未生成缓存译文";
+    const pane = this.localizer.t.pane;
+    const cacheName = targetName || pane.cacheNotGenerated;
     if (state.isTranslating) {
       return {
         kind: "idle",
-        label: "翻译中",
-        title: "翻译任务正在运行，可点击“取消翻译”停止。"
+        label: pane.statusTranslating,
+        title: pane.translationRunning
       };
     }
     if (state.errorMessage) {
       return {
         kind: "error",
-        label: "错误",
+        label: pane.statusError,
         title: state.errorMessage,
         detail: state.errorMessage,
         detailKind: "error"
@@ -432,7 +555,7 @@ export class TranslationPaneController {
     if (unsupportedReason) {
       return {
         kind: "idle",
-        label: "未翻译",
+        label: pane.statusNotTranslated,
         title: unsupportedReason,
         detail: unsupportedReason,
         detailKind: "warning"
@@ -442,9 +565,9 @@ export class TranslationPaneController {
     if (state.warningMessage || state.staleCount > 0) {
       return {
         kind: "stale",
-        label: "译文过期",
-        title: state.warningMessage ?? `${cacheName} 已过期，当前脏区 ${state.staleCount}`,
-        detail: state.warningMessage ?? `${cacheName} 已过期，当前脏区 ${state.staleCount}`,
+        label: pane.statusStale,
+        title: state.warningMessage ?? this.localizer.format(pane.staleDetail, { cacheName, count: state.staleCount }),
+        detail: state.warningMessage ?? this.localizer.format(pane.staleDetail, { cacheName, count: state.staleCount }),
         detailKind: "warning"
       };
     }
@@ -452,16 +575,26 @@ export class TranslationPaneController {
     if (state.targetMarkdown) {
       return {
         kind: "cached",
-        label: "已缓存",
-        title: state.infoMessage ?? `${cacheName} | 缓存译文`
+        label: pane.statusCached,
+        title: state.infoMessage ?? this.localizer.format(pane.cachedDetail, { cacheName })
       };
     }
 
     return {
       kind: "idle",
-      label: "未翻译",
-      title: "还没有缓存译文。执行“全文翻译”后会在插件缓存区生成译文。"
+      label: pane.statusNotTranslated,
+      title: pane.noCachedTranslation
     };
+  }
+
+  private associationReason(reason?: FileAssociationReason): string {
+    if (reason === "no-saved-markdown") {
+      return this.localizer.t.pane.noSavedMarkdown;
+    }
+    if (reason === "markdown-only") {
+      return this.localizer.t.pane.markdownOnly;
+    }
+    return this.localizer.t.pane.unsupportedFile;
   }
 
   private syncToolbarMode(): void {
@@ -506,6 +639,8 @@ export class TranslationPaneController {
     }
 
     this.host.style.setProperty("--typora-bilingual-pane-width", `${clamped}%`);
+    this.currentPaneWidth = clamped;
+    this.resizeHandle?.setAttribute("aria-valuenow", String(clamped));
     this.renderPresetState(clamped);
     this.scheduleLayoutSync();
 

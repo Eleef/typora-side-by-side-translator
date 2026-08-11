@@ -1,4 +1,4 @@
-import { app as coreApp, fs, path as corePath } from "@typora-community-plugin/core";
+import { fs, path as corePath, type App } from "@typora-community-plugin/core";
 import { sanitizeDiagnosticMeta } from "../security/DiagnosticSanitizer";
 
 const MAX_LOG_BYTES = 256 * 1024;
@@ -46,6 +46,8 @@ export class PluginDiagnostics {
   private currentLogBytes = 0;
   private writeQueue: Promise<void> = Promise.resolve();
 
+  public constructor(private readonly app: App) {}
+
   public static markModuleEvaluated(): void {
     const buffer = ensureWindowBuffer();
     const at = new Date().toISOString();
@@ -61,30 +63,29 @@ export class PluginDiagnostics {
     this.attached = true;
     this.logPath = this.resolveLogPath(pluginDataPath);
     await this.migrateLegacyLog();
+    if (!this.attached) {
+      return;
+    }
     const buffer = ensureWindowBuffer();
     buffer.logPath = this.logPath ?? undefined;
     await this.initializeLogSize();
-
-    window.addEventListener("error", (event) => {
-      void this.error("window.error", {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno
-      });
-    });
-
-    window.addEventListener("unhandledrejection", (event) => {
-      const reason = event.reason instanceof Error ? event.reason.stack ?? event.reason.message : String(event.reason);
-      void this.error("window.unhandledrejection", { reason });
-    });
+    if (!this.attached) {
+      return;
+    }
 
     await this.info("diagnostics attached", {
       logPath: this.logPath,
-      pluginGlobalDir: coreApp.env?.PLUGIN_GLOBAL_DIR,
-      coreVersion: coreApp.coreVersion,
-      platform: coreApp.platform
+      pluginGlobalDir: this.app.env?.PLUGIN_GLOBAL_DIR,
+      coreVersion: this.app.coreVersion,
+      platform: this.app.platform
     });
+  }
+
+  public detach(): void {
+    if (!this.attached) {
+      return;
+    }
+    this.attached = false;
   }
 
   public async debug(message: string, meta?: unknown): Promise<void> {
@@ -125,7 +126,7 @@ export class PluginDiagnostics {
 
   private resolveLogPath(pluginDataPath: string): string | null {
     const baseDir =
-      coreApp.env?.PLUGIN_GLOBAL_DIR ||
+      this.app.env?.PLUGIN_GLOBAL_DIR ||
       (pluginDataPath ? corePath.dirname(pluginDataPath) : "");
     if (!baseDir) {
       return null;

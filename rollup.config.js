@@ -18,6 +18,9 @@ function copyFilePlugin() {
       fs.copyFileSync(path.resolve(__dirname, "manifest.json"), path.join(outputDir, "manifest.json"));
       fs.copyFileSync(path.resolve(__dirname, "style.css"), path.join(outputDir, "style.css"));
       fs.copyFileSync(path.resolve(__dirname, "dist", "main.js"), path.join(outputDir, "main.js"));
+      fs.cpSync(path.resolve(__dirname, "src", "i18n", "locales"), path.join(outputDir, "locales"), {
+        recursive: true
+      });
     }
   };
 }

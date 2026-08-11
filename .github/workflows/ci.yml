@@ -53,6 +53,9 @@ jobs:
         run: npm ci
 
       - name: Build installable plugin
+        run: npm run check
+
+      - name: Package installable plugin
         run: npm run package
 
       - name: Verify Windows installer and doctor

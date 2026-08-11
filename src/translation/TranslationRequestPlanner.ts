@@ -12,7 +12,7 @@ export class TranslationRequestPlanner {
     mode: TranslationMode
   ): Promise<TranslationRequestPayload[]> {
     if (mode === "stale" && existingMap && existingMap.blockIdAlgorithm !== TRANSLATION_BLOCK_ID_ALGORITHM) {
-      throw new Error("缓存映射来自旧版块标识算法。为保护人工译文，请执行“全文翻译”显式重建缓存。");
+      throw new UserFacingError("cacheLegacy");
     }
 
     const existingMapById = new Map((existingMap?.blocks ?? []).map((block) => [block.id, block]));
@@ -29,7 +29,7 @@ export class TranslationRequestPlanner {
     }
 
     if (mode === "stale" && existingMap && manuallyEditedIds.size > 0 && this.hasStructuralChanges(blocks, existingMap)) {
-      throw new Error("检测到文档块结构变化和人工改写译文。为避免错配，已停止刷新脏区；请先导出或备份译文，再执行“全文翻译”。");
+      throw new UserFacingError("manualStructureConflict");
     }
 
     const requests: TranslationRequestPayload[] = [];
@@ -105,3 +105,4 @@ export class TranslationRequestPlanner {
     });
   }
 }
+import { UserFacingError } from "../i18n/UserFacingError";

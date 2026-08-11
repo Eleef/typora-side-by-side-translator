@@ -2,18 +2,16 @@ import { TargetLanguage } from "../types";
 
 export interface TargetLanguageDefinition {
   code: TargetLanguage;
-  label: string;
   promptName: string;
   fileSuffix: string;
-  shortLabel: string;
 }
 
 export const TARGET_LANGUAGES: readonly TargetLanguageDefinition[] = [
-  { code: "zh-CN", label: "简体中文", promptName: "Simplified Chinese", fileSuffix: "zh", shortLabel: "中简" },
-  { code: "zh-TW", label: "繁体中文", promptName: "Traditional Chinese", fileSuffix: "zh-TW", shortLabel: "中繁" },
-  { code: "en", label: "English", promptName: "English", fileSuffix: "en", shortLabel: "EN" },
-  { code: "ja", label: "日本語", promptName: "Japanese", fileSuffix: "ja", shortLabel: "日" },
-  { code: "ko", label: "한국어", promptName: "Korean", fileSuffix: "ko", shortLabel: "한" }
+  { code: "zh-CN", promptName: "Simplified Chinese", fileSuffix: "zh" },
+  { code: "zh-TW", promptName: "Traditional Chinese", fileSuffix: "zh-TW" },
+  { code: "en", promptName: "English", fileSuffix: "en" },
+  { code: "ja", promptName: "Japanese", fileSuffix: "ja" },
+  { code: "ko", promptName: "Korean", fileSuffix: "ko" }
 ] as const;
 
 const TARGET_LANGUAGE_BY_CODE = new Map(TARGET_LANGUAGES.map((language) => [language.code, language]));

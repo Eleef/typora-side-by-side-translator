@@ -17,7 +17,8 @@ export class ExplicitTranslationAuthorizer {
 
   public assertAuthorized(value: ExplicitTranslationAuthorization | undefined): asserts value is ExplicitTranslationAuthorization {
     if (!value || value[AUTHORIZATION_MARKER] !== true) {
-      throw new Error("翻译请求缺少显式用户授权，已阻止网络调用。");
+      throw new UserFacingError("authorizationMissing");
     }
   }
 }
+import { UserFacingError } from "../i18n/UserFacingError";

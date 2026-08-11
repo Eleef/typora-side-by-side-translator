@@ -68,6 +68,10 @@ try {
   if ((Invoke-Doctor "Installed") -ne 0) {
     throw "Installed-mode doctor failed after a healthy installation."
   }
+  $redactedDoctorOutput = @(& $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "scripts\doctor.ps1") -Mode Installed -TyporaHome $typoraHome -CommunityRoot $communityRoot -RedactPaths)
+  if ($LASTEXITCODE -ne 0 -or ($redactedDoctorOutput -join "`n").Contains($sandbox)) {
+    throw "Redacted doctor output failed or exposed the sandbox path."
+  }
 
   if (-not (Test-Path -LiteralPath $releaseZip -PathType Leaf)) {
     throw "Release package is required for ZIP installer smoke: $releaseZip"

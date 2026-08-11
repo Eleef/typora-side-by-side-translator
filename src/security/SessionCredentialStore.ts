@@ -1,3 +1,4 @@
+import { UserFacingError } from "../i18n/UserFacingError";
 import { normalizeAndValidateBaseUrl } from "./EndpointPolicy";
 
 function endpointOrigin(baseUrl: string): string {
@@ -18,7 +19,7 @@ export class SessionCredentialStore {
 
     const origin = endpointOrigin(baseUrl);
     if (!origin) {
-      throw new Error("请先配置 baseUrl，再输入 API key。");
+      throw new UserFacingError("baseUrlRequiredForKey");
     }
     this.apiKey = trimmedKey;
     this.origin = origin;

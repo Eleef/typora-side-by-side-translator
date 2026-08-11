@@ -24,6 +24,8 @@ Never include real API keys, private Markdown, unredacted diagnostic logs, or fu
 - Remote endpoints require HTTPS; loopback-hosted local services may use HTTP.
 - Session mode is the default and holds API keys in memory for one Typora session.
 - Optional plugin-settings mode stores the API key in plaintext in the current user's community plugin data. Enable it only when restart convenience outweighs protection from other programs running as the same Windows user.
-- Changing the API service origin, switching back to session mode, or using the delete action removes the saved key. Reinstalling plugin code normally preserves community settings; deleting the plugin data directory removes the saved key.
-- Translation cache and diagnostic logs are local files and can be cleared from plugin settings.
+- Changing the API service origin, switching back to session mode, or using the delete action removes the saved key. Marketplace uninstall and code replacement do not remove plugin data; use **Erase all local plugin data** before uninstalling when settings, caches, and logs must be removed.
+- The first network translation requires explicit data-transfer consent and names the configured service origin.
+- Translation cache and diagnostic logs are local files and can be cleared from plugin settings. Current-document cleanup affects only the active target language.
+- Raw Markdown HTML is not executed in the translation pane. Rendered output is sanitized with an explicit tag and attribute allowlist that excludes scripts and external resource elements.
 - Typora and typora-community-plugin are third-party runtime dependencies outside this repository's security boundary.

@@ -79,15 +79,67 @@ test("Windows doctor checks the community market, compatibility and runtime mark
     assert.ok(doctor.includes(contract), `missing doctor contract: ${contract}`);
   }
   assert.match(doctor, /Test-Utf8Bom/);
+  assert.match(doctor, /RedactPaths/);
 });
 
 test("persistent API key storage remains an explicit plaintext opt-in", () => {
   const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+  const zhLocale = fs.readFileSync(path.join(__dirname, "..", "src", "i18n", "locales", "lang.zh-cn.json"), "utf8");
 
   assert.match(pluginMain, /credentialStorageMode:\s*"session"/);
-  assert.match(pluginMain, /\["plugin-settings",\s*"保存在插件设置中（明文）"\]/);
+  assert.match(zhLocale, /保存在插件设置中（明文）/);
   assert.match(pluginMain, /storedApiKey/);
-  assert.match(pluginMain, /同一 Windows 用户下的其他程序可以读取/);
+  assert.match(zhLocale, /同一 Windows 用户下的其他程序可以读取/);
+});
+
+test("settings and translation pane do not hard-code Chinese UI strings", () => {
+  const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+  const pane = fs.readFileSync(path.join(__dirname, "..", "src", "ui", "TranslationPaneController.ts"), "utf8");
+  assert.doesNotMatch(pluginMain, /[\u4e00-\u9fff]/);
+  assert.doesNotMatch(pane, /[\u4e00-\u9fff]/);
+});
+
+test("runtime integration uses community editor events and has a complete teardown path", () => {
+  const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+  const pane = fs.readFileSync(path.join(__dirname, "..", "src", "ui", "TranslationPaneController.ts"), "utf8");
+  const diagnostics = fs.readFileSync(path.join(__dirname, "..", "src", "diagnostics", "PluginDiagnostics.ts"), "utf8");
+
+  assert.match(pluginMain, /editor\.on\("load"/);
+  assert.match(pluginMain, /editor\.on\("edit"/);
+  assert.doesNotMatch(pluginMain, /editor:load-complete|editor:content-change/);
+  assert.match(pluginMain, /paneController\?\.destroy\(\)/);
+  assert.match(pluginMain, /requestedRefreshRevision/);
+  assert.match(pluginMain, /isRefreshCurrent\(revision, association\)/);
+  assert.match(pane, /public destroy\(\): void/);
+  assert.match(pane, /originalParent\.insertBefore\(source, nextSibling\)/);
+  assert.match(diagnostics, /public detach\(\): void/);
+  assert.doesNotMatch(diagnostics, /window\.addEventListener\("error"|window\.addEventListener\("unhandledrejection"/);
+  assert.match(pane, /role", "separator"/);
+  assert.match(pane, /aria-live="polite"/);
+});
+
+test("file-based interface translations are included in build and install contracts", () => {
+  const localizer = fs.readFileSync(path.join(__dirname, "..", "src", "i18n", "PluginLocalizer.ts"), "utf8");
+  const rollup = fs.readFileSync(path.join(__dirname, "..", "rollup.config.js"), "utf8");
+  const installer = fs.readFileSync(path.join(__dirname, "..", "scripts", "install-plugin.ps1"), "utf8");
+
+  assert.match(localizer, /localePath: this\.localePath/);
+  assert.doesNotMatch(localizer, /resources:/);
+  assert.match(rollup, /src", "i18n", "locales/);
+  for (const locale of ["lang.en.json", "lang.ja.json", "lang.ko.json", "lang.zh-cn.json", "lang.zh-tw.json"]) {
+    assert.match(installer, new RegExp(locale.replaceAll(".", "\\.")));
+  }
+});
+
+test("marketplace privacy controls require first-use consent and explicit local-data erasure", () => {
+  const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+  const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+
+  assert.match(pluginMain, /translationDisclosureAccepted:\s*false/);
+  assert.match(pluginMain, /confirmTranslationDisclosure\(\)/);
+  assert.match(pluginMain, /public async eraseAllLocalData\(\)/);
+  assert.match(pluginMain, /this\.app\.plugins\.disablePlugin\(this\.manifest\.id\)/);
+  assert.match(readme, /uninstalling plugin code does not remove community settings, caches, or logs/i);
 });
 
 test("release versions use numeric semantic versions without a v prefix", () => {

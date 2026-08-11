@@ -20,7 +20,9 @@ $legacyPluginIds = @("eleef.typora-side-by-side-translation", "typora-bilingual"
 $target = [IO.Path]::GetFullPath((Join-Path $pluginsRoot $pluginId))
 $staging = [IO.Path]::GetFullPath((Join-Path $pluginsRoot "$pluginId.installing"))
 $doctor = Join-Path $PSScriptRoot "doctor.ps1"
-$packageFiles = @("manifest.json", "main.js", "style.css")
+$packageRootFiles = @("manifest.json", "main.js", "style.css")
+$localeFiles = @("lang.en.json", "lang.ja.json", "lang.ko.json", "lang.zh-cn.json", "lang.zh-tw.json")
+$packageFiles = @($packageRootFiles) + @($localeFiles | ForEach-Object { "locales\$_" })
 $windowsPowerShell = (Get-Command powershell.exe -ErrorAction Stop).Source
 
 function Get-Sha256 {
@@ -87,9 +89,21 @@ if (-not (Test-Path $source)) {
 }
 
 $sourceEntries = @(Get-ChildItem -LiteralPath $source -Force)
-$unexpectedEntries = @($sourceEntries | Where-Object { $_.PSIsContainer -or $_.Name -notin $packageFiles })
-if ($sourceEntries.Count -ne $packageFiles.Count -or $unexpectedEntries.Count -ne 0) {
-  throw "Plugin package root must contain only manifest.json, main.js, and style.css."
+$unexpectedEntries = @($sourceEntries | Where-Object {
+  ($_.PSIsContainer -and $_.Name -ne "locales") -or (-not $_.PSIsContainer -and $_.Name -notin $packageRootFiles)
+})
+if ($sourceEntries.Count -ne ($packageRootFiles.Count + 1) -or $unexpectedEntries.Count -ne 0) {
+  throw "Plugin package root must contain manifest.json, main.js, style.css, and the locales directory only."
+}
+$sourceLocales = Join-Path $source "locales"
+$localeEntries = if (Test-Path -LiteralPath $sourceLocales -PathType Container) {
+  @(Get-ChildItem -LiteralPath $sourceLocales -Force)
+} else {
+  @()
+}
+$unexpectedLocales = @($localeEntries | Where-Object { $_.PSIsContainer -or $_.Name -notin $localeFiles })
+if ($localeEntries.Count -ne $localeFiles.Count -or $unexpectedLocales.Count -ne 0) {
+  throw "Plugin locales directory is incomplete or contains unexpected entries."
 }
 $sourceManifest = Get-Content -LiteralPath (Join-Path $source "manifest.json") -Raw | ConvertFrom-Json
 if ($sourceManifest.id -ne $pluginId -or -not $sourceManifest.version) {
@@ -136,7 +150,7 @@ if (Test-Path $target) {
   Remove-Item -LiteralPath $target -Recurse -Force
 }
 Move-Item -LiteralPath $staging -Destination $target
-Write-Output "verified_installed_file_hashes=manifest.json,main.js,style.css"
+Write-Output "verified_installed_file_hashes=$($packageFiles -join ',')"
 
 foreach ($legacyName in $legacyPluginIds) {
   $legacyPath = [IO.Path]::GetFullPath((Join-Path $pluginsRoot $legacyName))

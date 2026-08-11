@@ -10,10 +10,15 @@
   "include": [
     "tests/**/*.ts",
     "src/types.ts",
+    "src/shims-markdown-it.d.ts",
     "src/utils.ts",
     "src/cache/**/*.ts",
+    "src/files/CacheKey.ts",
+    "src/i18n/**/*.ts",
     "src/markdown/**/*.ts",
     "src/security/**/*.ts",
-    "src/translation/**/*.ts"
+    "src/translation/**/*.ts",
+    "src/ui/**/*.ts",
+    "src/sync/**/*.ts"
   ]
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { UserFacingError } from "../src/i18n/UserFacingError";
 import { BlockExtractionService } from "../src/markdown/BlockExtractionService";
 import { TranslationMarkdownCodec } from "../src/translation/TranslationMarkdownCodec";
 import { MarkdownStructureProtector } from "../src/translation/MarkdownStructureProtector";
@@ -115,9 +116,12 @@ test("Markdown protection restores URLs, inline code, math and HTML while enforc
   assert.match(restored, /<kbd>Enter<\/kbd>/);
   assert.throws(
     () => protectedMarkdown.restoreAndValidate(translated.replace(/TYPORASIDEBYSIDEPROTECTED\d+TOKEN/, "changed")),
-    /保护标记|受保护/
+    (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
   );
-  assert.throws(() => protector.protect("- one\n- two").restoreAndValidate("one and two"), /Markdown 块结构/);
+  assert.throws(
+    () => protector.protect("- one\n- two").restoreAndValidate("one and two"),
+    (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
+  );
 
   const reference = protector.protect("Read [Guide][guide].");
   const restoredReference = reference.restoreAndValidate(reference.markdown.replace("Read", "阅读"));
@@ -128,5 +132,8 @@ test("Markdown protection restores URLs, inline code, math and HTML while enforc
     .replace("TYPORASIDEBYSIDEPROTECTED0TOKEN", "TEMPORARYTOKEN")
     .replace("TYPORASIDEBYSIDEPROTECTED1TOKEN", "TYPORASIDEBYSIDEPROTECTED0TOKEN")
     .replace("TEMPORARYTOKEN", "TYPORASIDEBYSIDEPROTECTED1TOKEN");
-  assert.throws(() => twoLinks.restoreAndValidate(swapped), /移动了受保护/);
+  assert.throws(
+    () => twoLinks.restoreAndValidate(swapped),
+    (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
+  );
 });

@@ -16,6 +16,16 @@
   align-self: stretch;
 }
 
+.typora-bilingual-host.is-pane-hidden > .typora-bilingual-source {
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: 100%;
+}
+
+.typora-bilingual-host.is-pane-hidden > .typora-bilingual-resizer {
+  display: none;
+}
+
 .typora-bilingual-host > .typora-bilingual-source > #write {
   width: 100% !important;
   max-width: 100% !important;
@@ -58,6 +68,11 @@
     rgba(11, 83, 148, 0.06);
 }
 
+.typora-bilingual-resizer:focus-visible {
+  outline: 2px solid rgba(11, 83, 148, 0.72);
+  outline-offset: -2px;
+}
+
 .typora-bilingual-resizer.is-active {
   background: linear-gradient(
       90deg,
@@ -94,7 +109,7 @@
   top: 12px;
   right: 14px;
   z-index: 3;
-  width: min(320px, calc(100% - 28px));
+  width: min(620px, calc(100% - 28px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -106,7 +121,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
   border: 1px solid var(--control-border-color, rgba(127, 127, 127, 0.18));
@@ -119,7 +134,7 @@
 
 .typora-bilingual-pane__actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -137,6 +152,14 @@
   background: rgba(127, 127, 127, 0.08);
 }
 
+.typora-bilingual-pane__button:focus-visible,
+.typora-bilingual-pane__preset:focus-visible,
+.typora-bilingual-pane__language:focus-visible,
+.typora-bilingual-pane__collapsed-toggle:focus-visible {
+  outline: 2px solid rgba(11, 83, 148, 0.72);
+  outline-offset: 2px;
+}
+
 .typora-bilingual-pane__button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -148,6 +171,7 @@
 
 .typora-bilingual-pane__controls-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

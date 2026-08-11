@@ -19,10 +19,11 @@ npm run check
 
 - `dist/main.js` 存在
 - `build/typora-side-by-side-translator/main.js` 存在
+- `build/typora-side-by-side-translator/locales/` 下存在英文、简体中文、繁体中文、日文和韩文资源
 - `build/typora-side-by-side-translator/manifest.json` 存在
 - `build/typora-side-by-side-translator/style.css` 存在
 - 严格类型检查通过
-- 运行时安全、多语言隔离、增量翻译、Markdown/导出、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 49 项
+- 运行时安全、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 61 项
 - 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
 
 版本候选验证：
@@ -69,7 +70,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - `doctor -Mode Community` 确认 Typora、社区市场注入、loader 和 core 完整
 - `plugins.json` 为无 BOM UTF-8，当前插件 ID 自动启用，旧 ID 被移除
 - 中间版本 `eleef.typora-side-by-side-translation` 和更早版本的代码目录被安全移除
-- 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` SHA-256 分别一致
+- 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` 及五个 `locales/*.json` SHA-256 分别一致
 - 完整 `doctor` 确认最低版本门槛、已验证组合和插件启动日志标记
 - 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.3`，并与本轮构建一致
 
@@ -77,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 - Installed Plugins 显示 **Typora Side-by-Side Translator**
 - 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.3**
-- 命令面板显示新名称下的 5 个命令，包括 `Cancel Translation`
+- 命令面板显示新名称下的 5 个命令；命令标题使用当前插件界面语言
 - 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
 
 ## Smoke 场景
@@ -275,6 +276,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 切换语言只读取对应缓存，不会自动翻译
 - 各语言使用独立缓存与 map，互不覆盖
 - 切回已翻译语言后直接显示其已有缓存
+
+### 10.2 插件界面语言
+
+1. 在设置页将界面语言依次切换为自动、英文、简体中文、繁体中文、日文和韩文
+2. 每次切换后重新打开命令面板并观察右侧 pane
+3. 保持目标语言不变，仅切换界面语言
+4. 输入无效 API 地址并触发一次校验错误
+
+期望：
+
+- 设置页、五个命令、右侧按钮、状态徽标、确认框和错误提示使用当前界面语言
+- 自动模式优先读取 Typora 原始区域设置；`zh-Hant`/`zh-HK` 等别名正确归一化，宿主语言无对应资源时回退英文
+- 切换界面语言不会改变目标语言，不会切换缓存，也不会发起网络请求
+- 技术字段名、诊断事件名和发送给模型的固定结构指令不因界面语言改变
 - 导出后缀分别为 `.zh.md`、`.zh-TW.md`、`.en.md`、`.ja.md` 和 `.ko.md`
 
 ### 11. Map 摘要、块标识与旧格式迁移
@@ -300,6 +315,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 2. 点击“清理当前文档”
 3. 点击“清理全部缓存”并确认
 4. 点击“清理日志”
+5. 在非生产测试数据上点击“清除全部插件本地数据”并确认
 
 期望：
 
@@ -307,6 +323,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 全部清理只删除插件翻译缓存
 - 日志和轮转备份均被删除
 - 日志中不出现 API key、完整本地路径或带查询参数的服务地址
+- 全部本地数据动作删除设置、已保存明文 key、缓存、映射和日志并禁用插件；已导出 Markdown 保留
 
 ## 已知风险
 

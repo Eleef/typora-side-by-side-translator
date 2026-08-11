@@ -16,8 +16,9 @@ Requirements:
 - Node.js 24
 - npm
 - Windows 10/11 for host smoke testing
-- Typora 1.12.4
-- typora-community-plugin 2.7.1
+- Typora 1.14.9 and typora-community-plugin 2.9.14 for the currently verified host smoke
+
+The manifest still declares Typora `1.12.4` and community core `2.5.28` as installation minimums. Do not describe that minimum pair as verified until it has completed the same host smoke.
 
 ```powershell
 npm ci
@@ -49,13 +50,13 @@ Maintainers validate a release candidate with:
 
 ```powershell
 npm ci
-npm run version:set -- 0.1.0-alpha.1
+npm run version:set -- <version>
 npm run ci
-$env:RELEASE_TAG = "0.1.0-alpha.1"
+$env:RELEASE_TAG = "<version>"
 npm run check:release
 ```
 
-`version:set` updates `package.json`, `package-lock.json`, and `manifest.json` together. Version tags do not use a `v` prefix. A release uploads `plugin.zip`, `SHA256SUMS.txt`, `install-plugin.ps1`, and `doctor.ps1`. The ZIP contains `manifest.json`, `main.js`, and `style.css` directly at its root. After publishing, run `npm run check:published -- --version <version>`.
+`version:set` updates `package.json`, `package-lock.json`, and `manifest.json` together. Version tags do not use a `v` prefix, and an existing release version must never be overwritten. A release uploads `plugin.zip`, `SHA256SUMS.txt`, `install-plugin.ps1`, and `doctor.ps1`. The ZIP contains `manifest.json`, `main.js`, `style.css`, and the file-based interface translations under `locales/`; package, installer, and published-release checks validate the complete list. After publishing, run `npm run check:published -- --version <version>`.
 
 ## Security Reports
 

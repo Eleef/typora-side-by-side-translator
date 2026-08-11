@@ -1,4 +1,5 @@
 import { PluginSettingsData, TranslationRequestPayload, TranslationResponsePayload } from "../types";
+import { UserFacingError, UserFacingErrorCode } from "../i18n/UserFacingError";
 import { normalizeAndValidateBaseUrl } from "../security/EndpointPolicy";
 import { delay } from "../utils";
 import { ExplicitTranslationAuthorization, ExplicitTranslationAuthorizer } from "./ExplicitTranslationAuthorizer";
@@ -11,9 +12,13 @@ export const MAX_TRANSLATION_RESPONSE_BYTES = 8_000_000;
 const MAX_ATTEMPTS = 3;
 const RESERVED_CONTROL_COMMENT = /<!--\s*typora-(?:side-by-side|bilingual):block-(?:start|end)\b/i;
 
-class RetryableTranslationError extends Error {
-  public constructor(message: string, public readonly retryAfterMs?: number) {
-    super(message);
+class RetryableTranslationError extends UserFacingError {
+  public constructor(
+    code: UserFacingErrorCode,
+    values: Record<string, string | number> = {},
+    public readonly retryAfterMs?: number
+  ) {
+    super(code, values);
   }
 }
 
@@ -63,7 +68,7 @@ export class OpenAICompatibleProvider {
     this.authorizer.assertAuthorized(authorization);
     throwIfTranslationCancelled(signal);
     if (!settings.baseUrl || !settings.apiKey || !settings.model) {
-      throw new Error("请先在插件设置中填写 baseUrl、apiKey 和 model。");
+      throw new UserFacingError("translationSettingsIncomplete");
     }
 
     const protectedBlocks = blocks.map((block) => {
@@ -95,7 +100,7 @@ export class OpenAICompatibleProvider {
       }
       const timer = this.runtime.setTimeout(() => {
         timedOut = true;
-        controller.abort(new Error("翻译请求超时。"));
+        controller.abort(new UserFacingError("requestTimeout"));
       }, settings.timeoutMs);
 
       try {
@@ -124,28 +129,40 @@ export class OpenAICompatibleProvider {
 
         if (!response.ok) {
           await response.body?.cancel().catch(() => undefined);
-          const message = `翻译接口返回 ${response.status} ${response.statusText}`;
+          const values = { status: response.status, statusText: response.statusText };
           if (this.isRetryableStatus(response.status)) {
-            throw new RetryableTranslationError(message, this.parseRetryAfter(response.headers.get("Retry-After")));
+            throw new RetryableTranslationError(
+              "apiStatus",
+              values,
+              this.parseRetryAfter(response.headers.get("Retry-After"))
+            );
           }
-          throw new Error(message);
+          throw new UserFacingError("apiStatus", values);
         }
 
         const responseText = await this.readResponseText(response, controller);
-        const payload = JSON.parse(responseText) as {
-          choices?: Array<{ message?: { content?: unknown } }>;
-        };
+        let payload: { choices?: Array<{ message?: { content?: unknown } }> };
+        try {
+          payload = JSON.parse(responseText) as typeof payload;
+        } catch {
+          throw new UserFacingError("responseInvalid");
+        }
         const content = payload?.choices?.[0]?.message?.content;
         if (typeof content !== "string") {
-          throw new Error("翻译接口未返回可解析文本。");
+          throw new UserFacingError("responseInvalid");
         }
         if (content.length > MAX_TRANSLATION_RESPONSE_CHARS) {
-          throw new Error("翻译接口返回内容过大，已拒绝处理。");
+          throw new UserFacingError("responseTooLarge");
         }
 
-        const parsed = JSON.parse(content) as TranslationResponsePayload;
+        let parsed: TranslationResponsePayload;
+        try {
+          parsed = JSON.parse(content) as TranslationResponsePayload;
+        } catch {
+          throw new UserFacingError("responseInvalid");
+        }
         if (!Array.isArray(parsed.blocks)) {
-          throw new Error("翻译接口返回的 JSON 缺少 blocks 数组。");
+          throw new UserFacingError("responseInvalid");
         }
 
         this.validateResponse(parsed, blocks);
@@ -162,12 +179,12 @@ export class OpenAICompatibleProvider {
         throwIfTranslationCancelled(signal);
         const normalizedError = error instanceof Error ? error : new Error(String(error));
         if (timedOut) {
-          lastError = new RetryableTranslationError("翻译请求超时。请检查网络或增大超时时间。");
+          lastError = new RetryableTranslationError("requestTimeout");
         } else if (normalizedError instanceof RetryableTranslationError || normalizedError instanceof TypeError) {
           lastError =
             normalizedError instanceof RetryableTranslationError
               ? normalizedError
-              : new RetryableTranslationError(normalizedError.message);
+              : new RetryableTranslationError("requestFailed");
         } else {
           throw normalizedError;
         }
@@ -177,7 +194,7 @@ export class OpenAICompatibleProvider {
       }
     }
 
-    throw lastError ?? new Error("翻译请求失败。");
+    throw lastError ?? new UserFacingError("requestFailed");
   }
 
   private restoreProtectedMarkdown(
@@ -185,7 +202,7 @@ export class OpenAICompatibleProvider {
     protection: ProtectedMarkdown | undefined
   ): string {
     if (!protection) {
-      throw new Error(`翻译接口返回了未知 block：${block.id}`);
+      throw new UserFacingError("responseBlockInvalid", { detail: `unknown block ${block.id}` });
     }
     return protection.restoreAndValidate(block.translatedMarkdown);
   }
@@ -196,23 +213,23 @@ export class OpenAICompatibleProvider {
 
     for (const block of response.blocks) {
       if (!block || typeof block.id !== "string" || typeof block.translatedMarkdown !== "string") {
-        throw new Error("翻译接口返回了无效的 block 数据。");
+        throw new UserFacingError("responseBlockInvalid", { detail: "invalid block shape" });
       }
       if (!expectedIds.has(block.id)) {
-        throw new Error(`翻译接口返回了未知 block：${block.id}`);
+        throw new UserFacingError("responseBlockInvalid", { detail: `unknown block ${block.id}` });
       }
       if (receivedIds.has(block.id)) {
-        throw new Error(`翻译接口重复返回 block：${block.id}`);
+        throw new UserFacingError("responseBlockInvalid", { detail: `duplicate block ${block.id}` });
       }
       if (RESERVED_CONTROL_COMMENT.test(block.translatedMarkdown)) {
-        throw new Error(`翻译接口返回的 block ${block.id} 包含插件保留控制注释。`);
+        throw new UserFacingError("responseBlockInvalid", { detail: `reserved control in block ${block.id}` });
       }
       receivedIds.add(block.id);
     }
 
     const missingIds = [...expectedIds].filter((id) => !receivedIds.has(id));
     if (missingIds.length > 0) {
-      throw new Error(`翻译接口缺少 ${missingIds.length} 个 block。`);
+      throw new UserFacingError("responseBlockInvalid", { detail: `${missingIds.length} missing block(s)` });
     }
   }
 
@@ -220,13 +237,13 @@ export class OpenAICompatibleProvider {
     const contentLength = Number.parseInt(response.headers.get("Content-Length") ?? "", 10);
     if (Number.isFinite(contentLength) && contentLength > MAX_TRANSLATION_RESPONSE_BYTES) {
       controller.abort();
-      throw new Error("翻译接口响应体过大，已在下载前拒绝处理。");
+      throw new UserFacingError("responseTooLarge");
     }
 
     if (!response.body) {
       const text = await response.text();
       if (new TextEncoder().encode(text).byteLength > MAX_TRANSLATION_RESPONSE_BYTES) {
-        throw new Error("翻译接口响应体过大，已拒绝处理。");
+        throw new UserFacingError("responseTooLarge");
       }
       return text;
     }
@@ -245,7 +262,7 @@ export class OpenAICompatibleProvider {
         if (totalBytes > MAX_TRANSLATION_RESPONSE_BYTES) {
           controller.abort();
           await reader.cancel().catch(() => undefined);
-          throw new Error("翻译接口响应体过大，已停止下载。");
+          throw new UserFacingError("responseTooLarge");
         }
         chunks.push(decoder.decode(value, { stream: true }));
       }

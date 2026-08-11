@@ -1,5 +1,4 @@
 import {
-  app as coreApp,
   fs,
   path as corePath,
   Plugin,
@@ -10,6 +9,9 @@ import {
 import { CacheMaintenanceService } from "./cache/CacheMaintenanceService";
 import { PluginDiagnostics } from "./diagnostics/PluginDiagnostics";
 import { FileAssociationService } from "./files/FileAssociationService";
+import { PluginLocalizer } from "./i18n/PluginLocalizer";
+import { UserFacingError } from "./i18n/UserFacingError";
+import { normalizeUiLanguage, UI_LANGUAGES } from "./i18n/UiLanguage";
 import { describeEndpointForDiagnostics, normalizeAndValidateBaseUrl } from "./security/EndpointPolicy";
 import { SessionCredentialStore } from "./security/SessionCredentialStore";
 import { ExplicitTranslationAuthorizer } from "./translation/ExplicitTranslationAuthorizer";
@@ -20,7 +22,7 @@ import {
   isTranslationCancelled,
   TranslationTaskCoordinator
 } from "./translation/TranslationTaskCoordinator";
-import { CredentialStorageMode, PaneRenderState, PluginSettingsData, TargetLanguage } from "./types";
+import { CredentialStorageMode, FileAssociationReason, PaneRenderState, PluginSettingsData, TargetLanguage, UiLanguage } from "./types";
 import { TranslationPaneController } from "./ui/TranslationPaneController";
 
 PluginDiagnostics.markModuleEvaluated();
@@ -34,30 +36,18 @@ const DEFAULT_SETTINGS: PluginSettingsData = {
   model: "",
   timeoutMs: 45000,
   targetLang: "zh-CN",
+  uiLanguage: "auto",
   credentialStorageMode: "session",
   storedApiKey: "",
+  translationDisclosureAccepted: false,
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact"
 };
 
-type DisposableLike = (() => void) | { unload: () => void } | undefined | null;
-
-type AppLike = {
-  workspace: {
-    activeMarkdownFile?: { path?: string };
-    activeFile?: string;
-    on: (eventName: string, callback: (...args: unknown[]) => void) => DisposableLike;
-  };
-  features?: {
-    markdownEditor?: {
-      on: (eventName: string, callback: (...args: unknown[]) => void) => DisposableLike;
-    };
-  };
-};
-
-export default class TyporaSideBySideTranslatorPlugin extends Plugin {
-  private readonly diagnostics = new PluginDiagnostics();
-  private readonly paneController = new TranslationPaneController();
+export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSettingsData> {
+  private readonly diagnostics = new PluginDiagnostics(this.app);
+  private localizer!: PluginLocalizer;
+  private paneController!: TranslationPaneController;
   private readonly translationAuthorizer = new ExplicitTranslationAuthorizer();
   private readonly translationTasks = new TranslationTaskCoordinator();
   private readonly translator = new TranslationOrchestrator(
@@ -72,8 +62,11 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
   private removedPersistedApiKey = false;
   private migratedLegacyApiKey = "";
   private paneVisible = false;
+  private disposed = false;
   private contentChangeTimer: number | null = null;
   private refreshPromise: Promise<void> | null = null;
+  private requestedRefreshRevision = 0;
+  private completedRefreshRevision = 0;
   private renderState: PaneRenderState = {
     association: null,
     targetMarkdown: null,
@@ -87,17 +80,42 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     isTranslating: false
   };
 
-  public override async onload(): Promise<void> {
-    await this.diagnostics.attach(this.dataPath);
-    await this.diagnostics.info("plugin onload start", {
-      manifestId: this.manifest.id,
-      manifestVersion: this.manifest.version,
-      dataPath: this.dataPath
-    });
+  public override onload(): void {
+    this.disposed = false;
+    this.register(() => this.disposeRuntime());
+    void this.initializePlugin();
+  }
 
+  public override onunload(): void {
+    this.disposeRuntime();
+  }
+
+  private async initializePlugin(): Promise<void> {
     try {
+      await this.diagnostics.attach(this.dataPath);
+      if (this.disposed) {
+        this.diagnostics.detach();
+        return;
+      }
+      if (!this.manifest.dir) {
+        throw new Error("Plugin installation directory is unavailable.");
+      }
+      this.localizer = new PluginLocalizer(corePath.join(this.manifest.dir, "locales"), this.getTyporaLocale());
+      this.paneController = new TranslationPaneController(this.localizer);
+      await this.diagnostics.info("plugin onload start", {
+        manifestId: this.manifest.id,
+        manifestVersion: this.manifest.version,
+        dataPath: this.dataPath
+      });
       await this.migrateLegacyPluginData();
+      if (this.disposed) {
+        return;
+      }
       await this.initializeSettings();
+      if (this.disposed) {
+        return;
+      }
+      this.localizer.setLanguage(this.settingsStore.get("uiLanguage"));
       const translationsCacheRoot = this.getTranslationsCacheRoot();
       this.associationService = new FileAssociationService(translationsCacheRoot);
       this.cacheMaintenance = new CacheMaintenanceService(translationsCacheRoot, fs, corePath);
@@ -110,21 +128,47 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       this.registerWorkspaceEvents();
       this.registerEditorEvents();
       this.paneController.ensureMounted({
-        onTranslateAll: () => void this.translateCurrentFile("full"),
-        onRefreshStale: () => void this.translateCurrentFile("stale"),
+        onTranslateAll: () => this.runBackground("translate all action failed", this.translateCurrentFile("full")),
+        onRefreshStale: () => this.runBackground("refresh stale action failed", this.translateCurrentFile("stale")),
         onCancelTranslation: () => this.cancelCurrentTranslation(),
-        onExportTarget: () => void this.exportTargetFile(),
-        onTargetLanguageChange: (targetLang) => void this.updateSetting("targetLang", targetLang),
+        onExportTarget: () => this.runBackground("export action failed", this.exportTargetFile()),
+        onTargetLanguageChange: (targetLang) =>
+          this.runBackground("target language update failed", this.updateSetting("targetLang", targetLang)),
         onJumpToSource: (blockId) => this.paneController.jumpToSource(blockId),
-        onResize: (paneWidthPercent) => void this.updateSetting("paneWidthPercent", paneWidthPercent)
+        onResize: (paneWidthPercent) =>
+          this.runBackground("pane width update failed", this.updateSetting("paneWidthPercent", paneWidthPercent))
       });
-      this.register(() => this.translationTasks.cancelAll("插件已卸载，翻译任务已取消。"));
       await this.refreshState();
+      if (this.disposed) {
+        return;
+      }
       await this.diagnostics.info("initial refresh complete");
     } catch (error) {
-      await this.diagnostics.error("failed to initialize plugin", this.errorMeta(error));
+      try {
+        await this.diagnostics.error("failed to initialize plugin", this.errorMeta(error));
+      } catch {
+        // Console logging remains available if file diagnostics could not initialize.
+      }
       console.error("[typora-side-by-side] failed to initialize", error);
+      if (!this.disposed) {
+        this.disposeRuntime();
+        window.setTimeout(() => this.app.plugins.disablePlugin(this.manifest.id), 0);
+      }
     }
+  }
+
+  private disposeRuntime(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    if (this.contentChangeTimer !== null) {
+      window.clearTimeout(this.contentChangeTimer);
+      this.contentChangeTimer = null;
+    }
+    this.translationTasks.cancelAll(this.localizer?.t.messages.pluginUnloaded ?? "Plugin unloaded");
+    this.paneController?.destroy();
+    this.diagnostics.detach();
   }
 
   public getRuntimeSettings(): PluginSettingsData {
@@ -134,8 +178,10 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       model: this.settingsStore.get("model"),
       timeoutMs: this.settingsStore.get("timeoutMs"),
       targetLang: normalizeTargetLanguage(this.settingsStore.get("targetLang")),
+      uiLanguage: normalizeUiLanguage(this.settingsStore.get("uiLanguage")),
       credentialStorageMode: this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode")),
       storedApiKey: this.settingsStore.get("storedApiKey") || "",
+      translationDisclosureAccepted: Boolean(this.settingsStore.get("translationDisclosureAccepted")),
       paneWidthPercent: this.normalizePaneWidth(this.settingsStore.get("paneWidthPercent")),
       toolbarDisplayMode: this.normalizeToolbarDisplayMode(this.settingsStore.get("toolbarDisplayMode"))
     };
@@ -143,7 +189,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
   public async updateSetting<K extends keyof PluginSettingsData>(key: K, value: PluginSettingsData[K]): Promise<void> {
     if (key === "storedApiKey") {
-      throw new Error("已保存的 API key 只能由插件内部更新。");
+      throw new Error(this.localizer.t.messages.persistedApiKeyInternalOnly);
     }
     if (key === "apiKey") {
       await this.updateApiKey(String(value));
@@ -164,9 +210,11 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
           ? (this.normalizeToolbarDisplayMode(value) as PluginSettingsData[K])
           : key === "targetLang"
             ? (normalizeTargetLanguage(value) as PluginSettingsData[K])
-            : key === "baseUrl"
-              ? (normalizeAndValidateBaseUrl(String(value)) as PluginSettingsData[K])
-              : value;
+            : key === "uiLanguage"
+              ? (normalizeUiLanguage(value) as PluginSettingsData[K])
+              : key === "baseUrl"
+                ? (normalizeAndValidateBaseUrl(String(value)) as PluginSettingsData[K])
+                : value;
     const previousOrigin = key === "baseUrl" ? this.getCredentialOrigin(this.settingsStore.get("baseUrl")) : "";
     this.settingsStore.set(key, nextValue);
     if (key === "baseUrl") {
@@ -187,17 +235,19 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       this.paneController.render(this.renderState);
     }
     if (key === "targetLang") {
-      this.translationTasks.cancelAll("目标语言已切换，翻译任务已取消。");
+      this.translationTasks.cancelAll(this.localizer.t.messages.targetLanguageChanged);
+      await this.refreshState();
+    }
+    if (key === "uiLanguage") {
+      this.localizer.setLanguage(nextValue);
+      this.updateLocalizedCommandTitles();
+      this.paneController.refreshLocalizedText();
       await this.refreshState();
     }
     await this.diagnostics.info("setting updated", {
       key,
       value: nextValue
     });
-  }
-
-  public get pluginApp(): AppLike {
-    return coreApp as unknown as AppLike;
   }
 
   public get diagnosticsLogPath(): string | null {
@@ -208,16 +258,27 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     return this.manifest.version;
   }
 
+  public get ui(): PluginLocalizer {
+    return this.localizer;
+  }
+
+  public formatUserError(error: unknown): string {
+    if (error instanceof UserFacingError) {
+      return this.localizer.format(this.localizer.t.errors[error.code], error.values);
+    }
+    return this.localizer.t.errors.unknown;
+  }
+
   public get credentialStatusDescription(): string {
     const settings = this.getRuntimeSettings();
     if (!settings.apiKey) {
       return settings.credentialStorageMode === "plugin-settings"
-        ? "明文保存已开启；请输入 API key 后将写入社区插件设置。"
-        : "尚未配置 API key；仅在当前 Typora 会话中保留。";
+        ? this.localizer.t.settings.credentialPlaintextEmpty
+        : this.localizer.t.settings.credentialSessionEmpty;
     }
     return settings.credentialStorageMode === "plugin-settings" && !!settings.storedApiKey
-      ? "API key 已保存在社区插件设置中；同一 Windows 用户下的其他程序可读取。"
-      : "API key 仅在当前 Typora 会话中可用。";
+      ? this.localizer.t.settings.credentialPlaintextSaved
+      : this.localizer.t.settings.credentialSessionActive;
   }
 
   public async clearApiKey(): Promise<void> {
@@ -230,19 +291,23 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
   public async getCacheDescription(): Promise<string> {
     const usage = await this.cacheMaintenance.getUsage();
-    return `${this.cacheMaintenance.rootPath} | ${usage.fileCount} 个文件 | ${this.formatBytes(usage.byteCount)}`;
+    return this.localizer.format(this.localizer.t.settings.cacheDescription, {
+      path: this.cacheMaintenance.rootPath,
+      count: usage.fileCount,
+      size: this.formatBytes(usage.byteCount)
+    });
   }
 
   public async clearCurrentCache(): Promise<void> {
     const association = this.getCurrentAssociation();
     if (!association.isSupportedSource) {
-      throw new Error(association.reason ?? "当前文件不支持缓存清理。");
+      throw new Error(this.getAssociationReason(association.reason, this.localizer.t.messages.cacheUnsupported));
     }
 
     await this.cacheMaintenance.clearAssociation(association);
     await this.diagnostics.info("current translation cache cleared", { sourcePath: association.sourcePath });
     await this.refreshState();
-    this.renderState.infoMessage = "当前文档的缓存译文和映射已清理。";
+    this.renderState.infoMessage = this.localizer.t.messages.currentCacheCleared;
     this.renderState.warningMessage = undefined;
     this.renderState.errorMessage = undefined;
     this.paneController.render(this.renderState);
@@ -252,7 +317,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     await this.cacheMaintenance.clearAll();
     await this.diagnostics.info("all translation caches cleared");
     await this.refreshState();
-    this.renderState.infoMessage = "Typora Side-by-Side Translator 的全部翻译缓存已清理。";
+    this.renderState.infoMessage = this.localizer.t.messages.allCachesCleared;
     this.renderState.warningMessage = undefined;
     this.renderState.errorMessage = undefined;
     this.paneController.render(this.renderState);
@@ -262,11 +327,42 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     await this.diagnostics.clear();
   }
 
+  public async eraseAllLocalData(): Promise<void> {
+    const dataDirectory = corePath.dirname(this.dataPath);
+    const logPath = this.diagnostics.getLogPath();
+    const logDirectory = logPath ? corePath.dirname(logPath) : corePath.join(dataDirectory, "logs");
+    const pathsToRemove = [
+      this.dataPath,
+      corePath.join(dataDirectory, PLUGIN_DATA_DIRECTORY),
+      ...LEGACY_PLUGIN_IDS.map((pluginId) => corePath.join(dataDirectory, `${pluginId}.json`)),
+      corePath.join(dataDirectory, "eleef.typora-side-by-side-translation"),
+      corePath.join(dataDirectory, "translations"),
+      ...[
+        "typora-side-by-side-translation.log",
+        "typora-side-by-side-translation.1.log",
+        "typora-bilingual.log",
+        "typora-bilingual.1.log"
+      ].map((filename) => corePath.join(logDirectory, filename))
+    ];
+
+    this.translationTasks.cancelAll(this.localizer.t.messages.pluginUnloaded);
+    this.sessionCredentials.clear();
+    await this.cacheMaintenance.eraseAll();
+    await this.diagnostics.clear();
+    this.app.plugins.disablePlugin(this.manifest.id);
+    for (const targetPath of pathsToRemove) {
+      if (await fs.exists(targetPath)) {
+        await fs.remove(targetPath);
+      }
+    }
+  }
+
   private async initializeSettings(): Promise<void> {
-    this.settingsStore = new PluginSettings<PluginSettingsData>(coreApp as never, this.manifest, { version: 1 });
+    this.settingsStore = new PluginSettings<PluginSettingsData>(this.app, this.manifest, { version: 1 });
     this.settingsStore.setDefault(DEFAULT_SETTINGS);
     this.settingsStore.load();
     this.settingsStore.set("targetLang", normalizeTargetLanguage(this.settingsStore.get("targetLang")));
+    this.settingsStore.set("uiLanguage", normalizeUiLanguage(this.settingsStore.get("uiLanguage")));
     this.settingsStore.set(
       "credentialStorageMode",
       this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode"))
@@ -338,10 +434,27 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     }
   }
 
+  private confirmTranslationDisclosure(): boolean {
+    if (this.settingsStore.get("translationDisclosureAccepted")) {
+      return true;
+    }
+    const endpoint = describeEndpointForDiagnostics(this.getRuntimeSettings().baseUrl);
+    const accepted = window.confirm(
+      this.localizer.format(this.localizer.t.messages.translationDisclosure, { endpoint })
+    );
+    if (accepted) {
+      this.settingsStore.set("translationDisclosureAccepted", true);
+      this.settingsStore.save();
+      void this.diagnostics.info("translation disclosure accepted", { endpoint });
+    }
+    return accepted;
+  }
+
   private registerPluginCommands(): void {
+    const commands = this.localizer.t.commands;
     this.registerCommand({
       id: "typora-side-by-side-translator.toggle-pane",
-      title: "Toggle Pane",
+      title: commands.togglePane,
       scope: "global",
       showInCommandPanel: true,
       callback: () => {
@@ -355,101 +468,139 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
     this.registerCommand({
       id: "typora-side-by-side-translator.translate-current-file",
-      title: "Translate Current File",
+      title: commands.translateCurrentFile,
       scope: "global",
       showInCommandPanel: true,
-      callback: () => void this.translateCurrentFile("full")
+      callback: () => this.runBackground("translate command failed", this.translateCurrentFile("full"))
     });
 
     this.registerCommand({
       id: "typora-side-by-side-translator.refresh-stale-blocks",
-      title: "Refresh Stale Blocks",
+      title: commands.refreshStaleBlocks,
       scope: "global",
       showInCommandPanel: true,
-      callback: () => void this.translateCurrentFile("stale")
+      callback: () => this.runBackground("refresh command failed", this.translateCurrentFile("stale"))
     });
 
     this.registerCommand({
       id: "typora-side-by-side-translator.export-target-file",
-      title: "Export Target File",
+      title: commands.exportTargetFile,
       scope: "global",
       showInCommandPanel: true,
-      callback: () => void this.exportTargetFile()
+      callback: () => this.runBackground("export command failed", this.exportTargetFile())
     });
 
     this.registerCommand({
       id: "typora-side-by-side-translator.cancel-translation",
-      title: "Cancel Translation",
+      title: commands.cancelTranslation,
       scope: "global",
       showInCommandPanel: true,
       callback: () => this.cancelCurrentTranslation()
     });
   }
 
+  private updateLocalizedCommandTitles(): void {
+    const titles: Record<string, string> = {
+      "typora-side-by-side-translator.toggle-pane": this.localizer.t.commands.togglePane,
+      "typora-side-by-side-translator.translate-current-file": this.localizer.t.commands.translateCurrentFile,
+      "typora-side-by-side-translator.refresh-stale-blocks": this.localizer.t.commands.refreshStaleBlocks,
+      "typora-side-by-side-translator.export-target-file": this.localizer.t.commands.exportTargetFile,
+      "typora-side-by-side-translator.cancel-translation": this.localizer.t.commands.cancelTranslation
+    };
+    for (const [id, title] of Object.entries(titles)) {
+      const command = this.app.commands.commandMap[`${this.manifest.id}:${id}`];
+      if (command) {
+        command.title = title;
+      }
+    }
+  }
+
   private registerWorkspaceEvents(): void {
-    this.registerDisposable(
-      this.pluginApp.workspace.on("file:open", () => {
-        void this.refreshState();
+    this.register(
+      this.app.workspace.on("file:open", () => {
+        this.runBackground("file open refresh failed", this.refreshState());
       })
     );
-    this.registerDisposable(
-      this.pluginApp.workspace.on("file:will-open", () => {
-        this.translationTasks.cancelAll("已切换文件，旧翻译任务已取消。");
-        void this.refreshState();
+    this.register(
+      this.app.workspace.on("file:will-open", () => {
+        this.translationTasks.cancelAll(this.localizer.t.messages.fileChanged);
+        this.runBackground("file switch refresh failed", this.refreshState());
       })
     );
   }
 
   private registerEditorEvents(): void {
-    const editor = this.pluginApp.features?.markdownEditor;
-    if (!editor) {
-      void this.diagnostics.warn("markdown editor feature unavailable");
-      return;
-    }
-
-    this.registerDisposable(
-      editor.on("editor:load-complete", () => {
-        void this.refreshState();
+    const editor = this.app.features.markdownEditor;
+    this.register(
+      editor.on("load", () => {
+        this.runBackground("editor load refresh failed", this.refreshState());
       })
     );
-    this.registerDisposable(
-      editor.on("editor:content-change", () => {
+    this.register(
+      editor.on("edit", () => {
         if (this.contentChangeTimer) {
           window.clearTimeout(this.contentChangeTimer);
         }
-        this.contentChangeTimer = window.setTimeout(() => void this.refreshState(), 400);
+        this.contentChangeTimer = window.setTimeout(
+          () => this.runBackground("editor change refresh failed", this.refreshState()),
+          400
+        );
       })
     );
   }
 
-  private registerDisposable(disposable: DisposableLike): void {
-    if (!disposable) {
-      return;
-    }
-    if (typeof disposable === "function") {
-      this.register(disposable);
-      return;
-    }
-    this.register(() => disposable.unload());
-  }
-
   private async refreshState(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    this.requestedRefreshRevision += 1;
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
 
-    this.refreshPromise = this.doRefreshState().finally(() => {
+    this.refreshPromise = (async () => {
+      while (!this.disposed && this.completedRefreshRevision < this.requestedRefreshRevision) {
+        const revision = this.requestedRefreshRevision;
+        await this.doRefreshState(revision);
+        this.completedRefreshRevision = revision;
+      }
+    })().finally(() => {
       this.refreshPromise = null;
     });
     return this.refreshPromise;
   }
 
-  private async doRefreshState(): Promise<void> {
+  private runBackground(message: string, task: Promise<void>): void {
+    void task.catch(async (error) => {
+      await this.diagnostics.error(message, this.errorMeta(error));
+      if (this.disposed) {
+        return;
+      }
+      this.paneVisible = true;
+      this.renderState = {
+        ...this.renderState,
+        isVisible: true,
+        isTranslating: false,
+        warningMessage: undefined,
+        infoMessage: undefined,
+        errorMessage: this.formatUserError(error)
+      };
+      this.paneController.render(this.renderState);
+    });
+  }
+
+  private async doRefreshState(revision: number): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     const association = this.getCurrentAssociation();
     const runtime = this.getRuntimeSettings();
     const paneWidthPercent = runtime.paneWidthPercent;
 
     if (!association.isSupportedSource) {
+      if (!this.isRefreshCurrent(revision, association)) {
+        return;
+      }
       this.renderState = {
         association,
         targetMarkdown: null,
@@ -469,8 +620,12 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       return;
     }
 
+    await this.migrateLegacyAssociationCache(association);
     const sourceMarkdown = await this.readCurrentMarkdown(association.sourcePath);
     const state = await this.translator.computeStaleState(association, sourceMarkdown);
+    if (!this.isRefreshCurrent(revision, association)) {
+      return;
+    }
     this.renderState = {
       association,
       targetMarkdown: state.targetMarkdown,
@@ -482,7 +637,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       paneWidthPercent,
       toolbarDisplayMode: runtime.toolbarDisplayMode,
       isTranslating: this.translationTasks.isRunning(association.cacheTargetPath),
-      warningMessage: state.staleCount > 0 && !!state.targetMarkdown ? "原文已更新，当前显示的是缓存译文，需手动刷新。" : undefined,
+      warningMessage:
+        state.staleCount > 0 && !!state.targetMarkdown ? this.localizer.t.messages.sourceUpdated : undefined,
       errorMessage: undefined,
       infoMessage: undefined
     };
@@ -496,19 +652,29 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         ...this.renderState,
         association,
         isVisible: true,
-        errorMessage: association.reason ?? "当前文件不受支持。"
+        errorMessage: this.getAssociationReason(association.reason)
       };
       this.paneVisible = true;
       this.paneController.render(this.renderState);
       return;
     }
 
+    const runtimeSettings = this.getRuntimeSettings();
+    if (
+      runtimeSettings.baseUrl &&
+      runtimeSettings.apiKey &&
+      runtimeSettings.model &&
+      !this.confirmTranslationDisclosure()
+    ) {
+      return;
+    }
+    await this.migrateLegacyAssociationCache(association);
     if (this.translationTasks.isRunning(association.cacheTargetPath)) {
       this.renderState = {
         ...this.renderState,
         association,
         isVisible: true,
-        warningMessage: "当前文档已有翻译任务正在运行，可点击“取消翻译”后重试。"
+        warningMessage: this.localizer.t.messages.taskAlreadyRunning
       };
       this.paneVisible = true;
       this.paneController.render(this.renderState);
@@ -526,7 +692,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       isTranslating: true,
       errorMessage: undefined,
       infoMessage: undefined,
-      warningMessage: mode === "stale" ? "正在刷新缓存译文脏区..." : "正在生成缓存译文..."
+      warningMessage:
+        mode === "stale" ? this.localizer.t.messages.refreshingStale : this.localizer.t.messages.generatingTranslation
     };
     this.paneController.render(this.renderState);
 
@@ -566,9 +733,14 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
         toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
         isTranslating: false,
-        infoMessage: staleCount === 0 ? `缓存译文已更新到 ${association.cacheTargetPath}` : undefined,
+        infoMessage:
+          staleCount === 0
+            ? this.localizer.format(this.localizer.t.messages.cacheUpdated, { path: association.cacheTargetPath })
+            : undefined,
         warningMessage:
-          staleCount > 0 ? `已保留 ${staleCount} 个人工译文块；对应原文已变化，译文仍标记为过期。` : undefined,
+          staleCount > 0
+            ? this.localizer.format(this.localizer.t.messages.manualBlocksPreserved, { count: staleCount })
+            : undefined,
         errorMessage: undefined
       };
     } catch (error) {
@@ -589,8 +761,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         isVisible: true,
         isTranslating: false,
         warningMessage: undefined,
-        infoMessage: isTranslationCancelled(error) ? "翻译任务已取消，现有缓存未被覆盖。" : undefined,
-        errorMessage: isTranslationCancelled(error) ? undefined : error instanceof Error ? error.message : String(error)
+        infoMessage: isTranslationCancelled(error) ? this.localizer.t.messages.translationCancelled : undefined,
+        errorMessage: isTranslationCancelled(error) ? undefined : this.formatUserError(error)
       };
     }
 
@@ -606,7 +778,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       ...this.renderState,
       association,
       isVisible: true,
-      warningMessage: "正在取消翻译任务...",
+      warningMessage: this.localizer.t.messages.cancellingTranslation,
       errorMessage: undefined
     };
     this.paneController.render(this.renderState);
@@ -618,13 +790,14 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       return;
     }
 
+    await this.migrateLegacyAssociationCache(association);
     const exists = await fs.exists(association.cacheTargetPath);
     if (!exists) {
       this.renderState = {
         ...this.renderState,
         association,
         isVisible: true,
-        errorMessage: "请先全文翻译，当前还没有缓存译文可导出。"
+        errorMessage: this.localizer.t.messages.exportRequiresTranslation
       };
       this.paneVisible = true;
       this.paneController.render(this.renderState);
@@ -633,14 +806,16 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
     const exportExists = await fs.exists(association.exportTargetPath);
     if (exportExists) {
-      const confirmed = window.confirm(`目标目录已存在同名译文：\n${association.exportTargetPath}\n\n是否覆盖？`);
+      const confirmed = window.confirm(
+        this.localizer.format(this.localizer.t.messages.confirmOverwriteExport, { path: association.exportTargetPath })
+      );
       if (!confirmed) {
         this.renderState = {
           ...this.renderState,
           association,
           isVisible: true,
           errorMessage: undefined,
-          infoMessage: "已取消导出，保留原目录中的现有译文文件。"
+          infoMessage: this.localizer.t.messages.exportCancelled
         };
         this.paneController.render(this.renderState);
         return;
@@ -661,7 +836,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         isVisible: true,
         errorMessage: undefined,
         warningMessage: undefined,
-        infoMessage: `译文已导出到 ${association.exportTargetPath}`
+        infoMessage: this.localizer.format(this.localizer.t.messages.exported, { path: association.exportTargetPath })
       };
     } catch (error) {
       await this.diagnostics.error("export target file failed", this.errorMeta(error));
@@ -671,16 +846,31 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
         isVisible: true,
         warningMessage: undefined,
         infoMessage: undefined,
-        errorMessage: error instanceof Error ? error.message : String(error)
+        errorMessage: this.formatUserError(error)
       };
     }
     this.paneController.render(this.renderState);
   }
 
   private getCurrentAssociation() {
-    const activePath = this.pluginApp.workspace.activeFile ?? this.pluginApp.workspace.activeMarkdownFile?.path;
+    const activePath = this.app.workspace.activeFile;
     const normalized = activePath ? activePath.replace(/\//g, corePath.sep) : null;
     return this.associationService.resolve(normalized, this.getRuntimeSettings().targetLang);
+  }
+
+  private async migrateLegacyAssociationCache(association: ReturnType<FileAssociationService["resolve"]>): Promise<void> {
+    const pairs: Array<[string | undefined, string]> = [
+      [association.legacyCacheTargetPath, association.cacheTargetPath],
+      [association.legacyCacheMapPath, association.cacheMapPath]
+    ];
+    for (const [legacyPath, currentPath] of pairs) {
+      if (!legacyPath || legacyPath === currentPath || !(await fs.exists(legacyPath)) || (await fs.exists(currentPath))) {
+        continue;
+      }
+      await fs.mkdir(corePath.dirname(currentPath));
+      await fs.move(legacyPath, currentPath);
+      await this.diagnostics.info("legacy document cache migrated", { legacyPath, currentPath });
+    }
   }
 
   private isSameAssociation(
@@ -690,11 +880,22 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
     return left.sourcePath === right.sourcePath && left.cacheTargetPath === right.cacheTargetPath;
   }
 
+  private isRefreshCurrent(
+    revision: number,
+    association: { sourcePath: string; cacheTargetPath: string }
+  ): boolean {
+    return (
+      !this.disposed &&
+      revision === this.requestedRefreshRevision &&
+      this.isSameAssociation(this.getCurrentAssociation(), association)
+    );
+  }
+
   private async readCurrentMarkdown(sourcePath: string): Promise<string> {
     const exists = await fs.exists(sourcePath);
     if (!exists) {
       await this.diagnostics.warn("active source file not found", { sourcePath });
-      throw new Error("未找到当前源文件。");
+      throw new Error(this.localizer.t.messages.sourceFileMissing);
     }
     return fs.readText(sourcePath);
   }
@@ -705,6 +906,28 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
 
   private getTranslationsCacheRoot(): string {
     return corePath.join(corePath.dirname(this.dataPath), PLUGIN_DATA_DIRECTORY, "translations");
+  }
+
+  private getTyporaLocale(): unknown {
+    const typoraOptions = (globalThis as typeof globalThis & {
+      _options?: { appLocale?: unknown; locale?: unknown };
+    })._options;
+    return (
+      typoraOptions?.appLocale ??
+      typoraOptions?.locale ??
+      this.app.settings.get("displayLang") ??
+      this.app.i18n.locale
+    );
+  }
+
+  private getAssociationReason(reason?: FileAssociationReason, fallback?: string): string {
+    if (reason === "no-saved-markdown") {
+      return this.localizer.t.pane.noSavedMarkdown;
+    }
+    if (reason === "markdown-only") {
+      return this.localizer.t.pane.markdownOnly;
+    }
+    return fallback ?? this.localizer.t.pane.unsupportedFile;
   }
 
   private normalizePaneWidth(value: number): number {
@@ -730,6 +953,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin {
       model: settings.model,
       timeoutMs: settings.timeoutMs,
       targetLang: settings.targetLang,
+      uiLanguage: settings.uiLanguage,
+      resolvedUiLocale: this.localizer.locale,
       retentionMode: settings.credentialStorageMode,
       paneWidthPercent: settings.paneWidthPercent,
       toolbarDisplayMode: settings.toolbarDisplayMode
@@ -824,7 +1049,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
   }
 
   public get name(): string {
-    return "Typora Side-by-Side Translator";
+    return this.pluginInstance.ui.t.settings.title;
   }
 
   private addSettingInput(
@@ -842,7 +1067,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
         input.addEventListener("change", () => {
           input.setCustomValidity("");
           void onChange(input.value).catch((error) => {
-            input.setCustomValidity(error instanceof Error ? error.message : String(error));
+            input.setCustomValidity(this.pluginInstance.formatUserError(error));
             input.reportValidity();
           });
         });
@@ -852,22 +1077,47 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
 
   public onshow(): void {
     this.containerEl.innerHTML = "";
-    this.addSettingTitle("Typora Side-by-Side Translator");
+    const ui = this.pluginInstance.ui;
+    const t = ui.t.settings;
+    this.addSettingTitle(t.title);
 
     this.addSetting((setting: SettingItem) => {
-      setting.addName("版本");
-      setting.addDescription(`当前安装版本：${this.pluginInstance.pluginVersion}`);
+      setting.addName(t.version);
+      setting.addDescription(ui.format(t.currentVersion, { version: this.pluginInstance.pluginVersion }));
     });
 
     const settings = this.pluginInstance.getRuntimeSettings();
     this.addSetting((setting: SettingItem) => {
-      setting.addName("目标语言");
-      setting.addDescription("切换后读取对应语言的独立缓存，不会自动发送翻译请求。");
+      setting.addName(t.uiLanguage);
+      setting.addDescription(t.uiLanguageDescription);
+      setting.addSelect((select) => {
+        for (const language of UI_LANGUAGES) {
+          const option = document.createElement("option");
+          option.value = language;
+          option.textContent = ui.uiLanguageLabel(language);
+          select.appendChild(option);
+        }
+        select.value = settings.uiLanguage;
+        select.addEventListener("change", () => {
+          void this.pluginInstance
+            .updateSetting("uiLanguage", select.value as UiLanguage)
+            .then(() => this.onshow())
+            .catch((error) => {
+              window.alert(this.pluginInstance.formatUserError(error));
+              this.onshow();
+            });
+        });
+      });
+    });
+
+    this.addSetting((setting: SettingItem) => {
+      setting.addName(t.targetLanguage);
+      setting.addDescription(t.targetLanguageDescription);
       setting.addSelect((select) => {
         for (const language of TARGET_LANGUAGES) {
           const option = document.createElement("option");
           option.value = language.code;
-          option.textContent = language.label;
+          option.textContent = ui.targetLanguageLabel(language.code);
           select.appendChild(option);
         }
         select.value = settings.targetLang;
@@ -876,25 +1126,25 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
             .updateSetting("targetLang", select.value as TargetLanguage)
             .then(() => this.onshow())
             .catch((error) => {
-              window.alert(error instanceof Error ? error.message : String(error));
+              window.alert(this.pluginInstance.formatUserError(error));
               this.onshow();
             });
         });
       });
     });
 
-    this.addSettingInput("baseUrl", "OpenAI 兼容接口基础地址，例如 https://host/v1。更换服务来源会清除当前会话和已保存的 API key。", settings.baseUrl, async (value) => {
+    this.addSettingInput(t.baseUrl, t.baseUrlDescription, settings.baseUrl, async (value) => {
       await this.pluginInstance.updateSetting("baseUrl", value.trim());
       this.onshow();
     });
 
     this.addSetting((setting: SettingItem) => {
-      setting.addName("API key 保存方式");
-      setting.addDescription("默认会话模式不落盘；明文模式可跨重启和覆盖安装，但同一 Windows 用户下的其他程序可以读取。");
+      setting.addName(t.credentialStorageMode);
+      setting.addDescription(t.credentialStorageDescription);
       setting.addSelect((select) => {
         const options: Array<[CredentialStorageMode, string]> = [
-          ["session", "仅当前 Typora 会话"],
-          ["plugin-settings", "保存在插件设置中（明文）"]
+          ["session", t.credentialSession],
+          ["plugin-settings", t.credentialPluginSettings]
         ];
         for (const [value, label] of options) {
           const option = document.createElement("option");
@@ -908,66 +1158,92 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
             .updateSetting("credentialStorageMode", select.value as CredentialStorageMode)
             .then(() => this.onshow())
             .catch((error) => {
-              window.alert(error instanceof Error ? error.message : String(error));
+              window.alert(this.pluginInstance.formatUserError(error));
               this.onshow();
             });
         });
       });
     });
 
-    this.addSettingInput("apiKey", this.pluginInstance.credentialStatusDescription, "", async (value) => {
+    this.addSettingInput(t.apiKey, this.pluginInstance.credentialStatusDescription, "", async (value) => {
       await this.pluginInstance.updateSetting("apiKey", value.trim());
       this.onshow();
     }, "password");
 
     this.addSetting((setting: SettingItem) => {
-      setting.addName("API key 管理");
-      setting.addDescription("同时删除当前会话 key 和插件设置中已保存的 key。");
+      setting.addName(t.apiKeyManagement);
+      setting.addDescription(t.apiKeyManagementDescription);
       setting.addButton((button) => {
-        button.textContent = "删除 API key";
+        button.textContent = t.deleteApiKey;
         button.addEventListener("click", () => void this.runSettingAction(button, () => this.pluginInstance.clearApiKey()));
       });
     });
 
-    this.addSettingInput("model", "OpenAI 兼容模型名。", settings.model, async (value) => {
+    this.addSettingInput(t.model, t.modelDescription, settings.model, async (value) => {
       await this.pluginInstance.updateSetting("model", value.trim());
     });
 
-    this.addSettingInput("timeoutMs", "单次翻译请求超时，单位毫秒。", String(settings.timeoutMs), async (value) => {
+    this.addSettingInput(t.timeout, t.timeoutDescription, String(settings.timeoutMs), async (value) => {
       const parsed = Number(value);
       await this.pluginInstance.updateSetting("timeoutMs", Number.isFinite(parsed) && parsed > 0 ? parsed : 45000);
     });
 
-    this.addSettingInput("paneWidthPercent", "右侧译文 pane 宽度百分比，范围 35-65。", String(settings.paneWidthPercent), async (value) => {
+    this.addSettingInput(t.paneWidth, t.paneWidthDescription, String(settings.paneWidthPercent), async (value) => {
       const parsed = Number(value);
       await this.pluginInstance.updateSetting("paneWidthPercent", Number.isFinite(parsed) ? parsed : 50);
     });
 
-    this.addSettingInput("toolbarDisplayMode", "右侧工具栏显示模式：compact 或 collapsed。", settings.toolbarDisplayMode, async (value) => {
-      await this.pluginInstance.updateSetting("toolbarDisplayMode", value.trim() === "collapsed" ? "collapsed" : "compact");
+    this.addSetting((setting: SettingItem) => {
+      setting.addName(t.toolbarMode);
+      setting.addDescription(t.toolbarModeDescription);
+      setting.addSelect((select) => {
+        const options: Array<["compact" | "collapsed", string]> = [
+          ["compact", t.toolbarCompact],
+          ["collapsed", t.toolbarCollapsed]
+        ];
+        for (const [value, label] of options) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        }
+        select.value = settings.toolbarDisplayMode;
+        select.addEventListener("change", () => {
+          void this.pluginInstance.updateSetting(
+            "toolbarDisplayMode",
+            select.value === "collapsed" ? "collapsed" : "compact"
+          );
+        });
+      });
     });
 
     this.addSetting((setting: SettingItem) => {
-      setting.addName("翻译缓存");
+      setting.addName(t.translationCache);
       setting.addDescription((description) => {
-        description.textContent = "正在统计缓存...";
+        description.textContent = t.calculatingCache;
         void this.pluginInstance
           .getCacheDescription()
           .then((value) => {
             description.textContent = value;
           })
           .catch((error) => {
-            description.textContent = `缓存统计失败：${error instanceof Error ? error.message : String(error)}`;
+            description.textContent = ui.format(t.cacheCalculationFailed, {
+              error: this.pluginInstance.formatUserError(error)
+            });
           });
       });
       setting.addButton((button) => {
-        button.textContent = "清理当前文档";
-        button.addEventListener("click", () => void this.runSettingAction(button, () => this.pluginInstance.clearCurrentCache()));
+        button.textContent = t.clearCurrentDocument;
+        button.addEventListener("click", () => {
+          if (window.confirm(t.confirmClearCurrentDocument)) {
+            void this.runSettingAction(button, () => this.pluginInstance.clearCurrentCache());
+          }
+        });
       });
       setting.addButton((button) => {
-        button.textContent = "清理全部缓存";
+        button.textContent = t.clearAllCaches;
         button.addEventListener("click", () => {
-          if (window.confirm("确定清理 Typora Side-by-Side Translator 的全部缓存译文和映射吗？已导出的译文文件不受影响。")) {
+          if (window.confirm(t.confirmClearAllCaches)) {
             void this.runSettingAction(button, () => this.pluginInstance.clearAllCaches());
           }
         });
@@ -977,14 +1253,32 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
     const diagnosticsPath = this.pluginInstance.diagnosticsLogPath;
     if (diagnosticsPath) {
       this.addSetting((setting: SettingItem) => {
-        setting.addName("Diagnostics Log");
+        setting.addName(t.diagnosticsLog);
         setting.addDescription(diagnosticsPath);
         setting.addButton((button) => {
-          button.textContent = "清理日志";
+          button.textContent = t.clearLog;
           button.addEventListener("click", () => void this.runSettingAction(button, () => this.pluginInstance.clearDiagnostics()));
         });
       });
     }
+
+    this.addSetting((setting: SettingItem) => {
+      setting.addName(t.eraseLocalData);
+      setting.addDescription(t.eraseLocalDataDescription);
+      setting.addButton((button) => {
+        button.textContent = t.eraseLocalData;
+        button.addEventListener("click", () => {
+          if (!window.confirm(t.confirmEraseLocalData)) {
+            return;
+          }
+          button.disabled = true;
+          void this.pluginInstance.eraseAllLocalData().catch((error) => {
+            button.disabled = false;
+            window.alert(this.pluginInstance.formatUserError(error));
+          });
+        });
+      });
+    });
   }
 
   private async runSettingAction(button: HTMLButtonElement, action: () => Promise<void>): Promise<void> {
@@ -993,7 +1287,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       await action();
       this.onshow();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error));
+      window.alert(this.pluginInstance.formatUserError(error));
     } finally {
       button.disabled = false;
     }
