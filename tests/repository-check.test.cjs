@@ -82,14 +82,18 @@ test("Windows doctor checks the community market, compatibility and runtime mark
   assert.match(doctor, /RedactPaths/);
 });
 
-test("persistent API key storage remains an explicit plaintext opt-in", () => {
+test("persistent API key storage is the explicit plaintext default", () => {
   const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
   const zhLocale = fs.readFileSync(path.join(__dirname, "..", "src", "i18n", "locales", "lang.zh-cn.json"), "utf8");
 
-  assert.match(pluginMain, /credentialStorageMode:\s*"session"/);
-  assert.match(zhLocale, /保存在插件设置中（明文）/);
+  assert.match(pluginMain, /credentialStorageMode:\s*"plugin-settings"/);
+  assert.match(pluginMain, /credentialStorageVersion:\s*0/);
+  assert.match(zhLocale, /本地保存（明文，默认）/);
   assert.match(pluginMain, /storedApiKey/);
   assert.match(zhLocale, /同一 Windows 用户下的其他程序可以读取/);
+  const installer = fs.readFileSync(path.join(__dirname, "..", "scripts", "install-plugin.ps1"), "utf8");
+  assert.match(installer, /credentialStorageVersion/);
+  assert.match(installer, /plaintext-empty/);
 });
 
 test("settings and translation pane do not hard-code Chinese UI strings", () => {

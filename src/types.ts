@@ -59,6 +59,7 @@ export interface PluginSettingsData {
   targetLang: TargetLanguage;
   uiLanguage: UiLanguage;
   credentialStorageMode: CredentialStorageMode;
+  credentialStorageVersion: number;
   storedApiKey: string;
   sessionCredentialConfigured: boolean;
   translationDisclosureAccepted: boolean;

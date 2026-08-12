@@ -88,23 +88,38 @@ if ((Test-Path -LiteralPath $target -PathType Container) -and (Test-Path -Litera
 
   $settingsHashBeforeInstall = Get-Sha256 $pluginSettingsPath
   $settings = $settingsDocument.settings
-  $storageMode = if ($settings.credentialStorageMode) { [string]$settings.credentialStorageMode } else { "session" }
+  $hasStoragePolicyVersion =
+    $null -ne $settings.PSObject.Properties["credentialStorageVersion"] -and
+    [int]$settings.credentialStorageVersion -ge 1
+  $storageMode = if ($settings.credentialStorageMode) {
+    [string]$settings.credentialStorageMode
+  } elseif ($hasStoragePolicyVersion) {
+    "plugin-settings"
+  } else {
+    "session"
+  }
   $hasStoredApiKey = $storageMode -eq "plugin-settings" -and -not [string]::IsNullOrWhiteSpace([string]$settings.storedApiKey)
   $hasProviderConfiguration = -not [string]::IsNullOrWhiteSpace([string]$settings.baseUrl) -and -not [string]::IsNullOrWhiteSpace([string]$settings.model)
   $hasSessionMarker = $null -ne $settings.PSObject.Properties["sessionCredentialConfigured"]
-  $hasSessionCredentialRisk = if ($hasSessionMarker) { [bool]$settings.sessionCredentialConfigured } else { $hasProviderConfiguration }
+  $hasSessionCredentialRisk = if ($hasSessionMarker) {
+    [bool]$settings.sessionCredentialConfigured -and -not $hasStoredApiKey
+  } else {
+    $storageMode -eq "session" -and $hasProviderConfiguration
+  }
 
   if ($hasSessionCredentialRisk -and -not $hasStoredApiKey -and -not $AcceptSessionCredentialLoss) {
     if ($runningWindow) {
-      throw "The API key is session-only. Before closing Typora, open this plugin's settings and select 'Save in plugin settings (plaintext)', or rerun with -AcceptSessionCredentialLoss if re-entering the key after installation is acceptable."
+      throw "The API key is session-only. Before closing Typora, open this plugin's settings and select 'Save locally (plaintext, default)', or rerun with -AcceptSessionCredentialLoss if re-entering the key after installation is acceptable."
     }
-    throw "The configured API key was session-only and cannot survive a closed Typora session. Reopen Typora and enter the key again, then select 'Save in plugin settings (plaintext)' before the next update; or rerun now with -AcceptSessionCredentialLoss."
+    throw "The configured API key was session-only and cannot survive a closed Typora session. Reopen Typora and enter the key again, then select 'Save locally (plaintext, default)' before the next update; or rerun now with -AcceptSessionCredentialLoss."
   }
 
   $credentialRetention = if ($hasStoredApiKey) {
     "plaintext-persisted"
   } elseif ($hasSessionCredentialRisk) {
     "session-loss-accepted"
+  } elseif ($storageMode -eq "plugin-settings") {
+    "plaintext-empty"
   } else {
     "session-empty"
   }

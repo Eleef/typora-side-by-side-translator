@@ -53,7 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-plugin.ps1 -Packag
 
 安装脚本会检查社区加载器、验证 ZIP 校验和与包结构、安装并启用插件，最后自动执行安装后健康检查。
 
-升级已有安装前，请先在插件设置中检查 API key 保存方式。若选择“仅当前 Typora 会话”，关闭 Typora 后 key 无法恢复，安装器会停止并提示先切换为“保存在插件设置中（明文）”。若你接受安装后重新输入，可在安装命令末尾显式增加 `-AcceptSessionCredentialLoss`。安装器会校验持久化设置文件在升级前后完全不变。
+升级已有安装前，请先在插件设置中检查 API key 保存方式。新版默认使用“本地保存（明文，默认）”，覆盖安装会保留该设置。若主动选择“不保存（仅当前 Typora 会话）”，关闭 Typora 后 key 无法恢复，安装器会停止并提示先切回本地保存；若接受安装后重新输入，可在安装命令末尾显式增加 `-AcceptSessionCredentialLoss`。安装器会校验持久化设置文件在升级前后完全不变。
 
 ### 从源码安装
 
@@ -76,7 +76,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 
 1. 在 Typora 中打开已保存的本地 `.md` 文件。
 2. 打开社区插件设置，分别选择界面语言和目标语言，再填写 `baseUrl`、`apiKey`、`model` 和 `timeoutMs`。
-3. API key 默认“仅当前 Typora 会话”，关闭、重启或更新后必须重新输入；若重启便利性高于本机静态保密需求，可明确选择“保存在插件设置中（明文）”。
+3. API key 默认“本地保存（明文）”，关闭、重启或更新后仍可恢复；同一 Windows 用户下的其他程序可以读取。若本机静态保密高于便利性，可选择“不保存（仅当前 Typora 会话）”。
 4. 打开社区命令面板；在已验证环境中快捷键是 `F2`。
 5. 搜索 **Side-by-Side Translator**，执行 **Toggle Pane**。
 6. 执行 **Translate Current File**，生成当前目标语言的缓存译文。
@@ -108,7 +108,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 - 第一次联网翻译前，插件会显示当前配置的服务并要求用户明确同意发送数据；拒绝后不会发出请求。
 - 请求由 Typora 直接发送到用户配置的服务，本项目不运营中转服务器。
 - 远程地址必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 和 `::1` 可以使用 HTTP。
-- 会话模式是默认值，只在内存中保存 API key；关闭、重启或更新 Typora 后无法恢复。可选的插件设置模式会在当前用户的社区插件数据中明文保存 key；同一 Windows 用户下运行的其他程序可以读取。
+- 本地插件设置是默认值，会在当前用户的社区插件数据中明文保存 API key；同一 Windows 用户下运行的其他程序可以读取。可选的会话模式只在内存中保留 key，关闭、重启或更新 Typora 后无法恢复。
 - 更换 API 服务来源会清除内存和已保存的 key；切回会话模式或点击显式删除也会移除已保存值。
 - 覆盖安装或卸载插件代码都不会删除社区插件设置、缓存和日志。升级安装器会验证持久设置文件安装前后完全一致；但只存在内存中的会话 key 会随 Typora 关闭而消失。如需清除本地数据，应在卸载前通过插件设置执行 **清除全部插件本地数据**。
 - 翻译缓存位于 `%USERPROFILE%\.typora\community-plugins\settings\data\eleef.typora-side-by-side-translator\translations`。

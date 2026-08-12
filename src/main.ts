@@ -13,6 +13,7 @@ import { PluginLocalizer } from "./i18n/PluginLocalizer";
 import { UserFacingError } from "./i18n/UserFacingError";
 import { normalizeUiLanguage, UI_LANGUAGES } from "./i18n/UiLanguage";
 import { describeEndpointForDiagnostics, normalizeAndValidateBaseUrl } from "./security/EndpointPolicy";
+import { resolveCredentialStoragePolicy } from "./security/CredentialStoragePolicy";
 import { SessionCredentialStore } from "./security/SessionCredentialStore";
 import { ExplicitTranslationAuthorizer } from "./translation/ExplicitTranslationAuthorizer";
 import { OpenAICompatibleProvider } from "./translation/OpenAICompatibleProvider";
@@ -37,7 +38,8 @@ const DEFAULT_SETTINGS: PluginSettingsData = {
   timeoutMs: 45000,
   targetLang: "zh-CN",
   uiLanguage: "auto",
-  credentialStorageMode: "session",
+  credentialStorageMode: "plugin-settings",
+  credentialStorageVersion: 0,
   storedApiKey: "",
   sessionCredentialConfigured: false,
   translationDisclosureAccepted: false,
@@ -61,7 +63,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   private associationService!: FileAssociationService;
   private cacheMaintenance!: CacheMaintenanceService;
   private readonly sessionCredentials = new SessionCredentialStore();
-  private removedPersistedApiKey = false;
+  private migratedPersistedApiKey = false;
   private migratedLegacyApiKey = "";
   private paneVisible = false;
   private disposed = false;
@@ -121,8 +123,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       const translationsCacheRoot = this.getTranslationsCacheRoot();
       this.associationService = new FileAssociationService(translationsCacheRoot);
       this.cacheMaintenance = new CacheMaintenanceService(translationsCacheRoot, fs, corePath);
-      if (this.removedPersistedApiKey) {
-        await this.diagnostics.warn("removed legacy plaintext API key from persisted settings");
+      if (this.migratedPersistedApiKey) {
+        await this.diagnostics.info("migrated legacy API key into the current credential storage policy");
       }
       await this.diagnostics.info("settings initialized", this.getRuntimeSettingsSummary());
       this.registerSettingTab(new TyporaSideBySideTranslatorSettingTab(this));
@@ -182,6 +184,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       targetLang: normalizeTargetLanguage(this.settingsStore.get("targetLang")),
       uiLanguage: normalizeUiLanguage(this.settingsStore.get("uiLanguage")),
       credentialStorageMode: this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode")),
+      credentialStorageVersion: Number(this.settingsStore.get("credentialStorageVersion")) || 0,
       storedApiKey: this.settingsStore.get("storedApiKey") || "",
       sessionCredentialConfigured: Boolean(this.settingsStore.get("sessionCredentialConfigured")),
       translationDisclosureAccepted: Boolean(this.settingsStore.get("translationDisclosureAccepted")),
@@ -192,7 +195,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   public async updateSetting<K extends keyof PluginSettingsData>(key: K, value: PluginSettingsData[K]): Promise<void> {
-    if (key === "storedApiKey" || key === "sessionCredentialConfigured") {
+    if (key === "storedApiKey" || key === "sessionCredentialConfigured" || key === "credentialStorageVersion") {
       throw new Error(this.localizer.t.messages.persistedApiKeyInternalOnly);
     }
     if (key === "apiKey") {
@@ -374,24 +377,29 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     }
     this.settingsStore.set("targetLang", normalizeTargetLanguage(this.settingsStore.get("targetLang")));
     this.settingsStore.set("uiLanguage", normalizeUiLanguage(this.settingsStore.get("uiLanguage")));
-    this.settingsStore.set(
-      "credentialStorageMode",
-      this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode"))
+    const credentialStoragePolicy = resolveCredentialStoragePolicy(
+      this.settingsStore.get("credentialStorageMode"),
+      this.settingsStore.get("credentialStorageVersion")
     );
-    const persistedApiKey = this.settingsStore.get("apiKey") || this.migratedLegacyApiKey;
+    this.settingsStore.set("credentialStorageMode", credentialStoragePolicy.mode);
+    this.settingsStore.set("credentialStorageVersion", credentialStoragePolicy.version);
+    const persistedApiKey =
+      this.settingsStore.get("apiKey") ||
+      (!this.settingsStore.get("storedApiKey") ? this.migratedLegacyApiKey : "");
     if (persistedApiKey) {
       try {
         this.sessionCredentials.set(this.settingsStore.get("baseUrl"), persistedApiKey);
         this.settingsStore.set("sessionCredentialConfigured", true);
+        if (this.settingsStore.get("credentialStorageMode") === "plugin-settings") {
+          this.settingsStore.set("storedApiKey", persistedApiKey);
+        }
       } catch {
         this.sessionCredentials.clear();
         this.settingsStore.set("sessionCredentialConfigured", false);
       }
       this.settingsStore.set("apiKey", "");
-      this.settingsStore.save();
-      this.removedPersistedApiKey = true;
-    } else if (this.settingsStore.get("credentialStorageMode") === "session") {
-      // A session key cannot survive a completed Typora restart.
+      this.migratedPersistedApiKey = true;
+    } else if (!this.settingsStore.get("storedApiKey")) {
       this.settingsStore.set("sessionCredentialConfigured", false);
     }
     if (
@@ -437,6 +445,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       this.clearStoredCredential();
     }
     this.settingsStore.set("credentialStorageMode", mode);
+    this.settingsStore.set("credentialStorageVersion", 1);
     this.settingsStore.save();
   }
 
@@ -970,7 +979,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   private normalizeCredentialStorageMode(value: unknown): CredentialStorageMode {
-    return value === "plugin-settings" ? "plugin-settings" : "session";
+    return value === "session" ? "session" : "plugin-settings";
   }
 
   private getRuntimeSettingsSummary(): Record<string, unknown> {
@@ -1025,23 +1034,35 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
           version?: number;
           settings?: Partial<PluginSettingsData>;
         };
-        const legacyApiKey = typeof legacyDocument.settings?.apiKey === "string" ? legacyDocument.settings.apiKey : "";
+        const legacyApiKey =
+          (typeof legacyDocument.settings?.apiKey === "string" ? legacyDocument.settings.apiKey : "") ||
+          (typeof legacyDocument.settings?.storedApiKey === "string" ? legacyDocument.settings.storedApiKey : "");
         if (!this.migratedLegacyApiKey && legacyApiKey) {
           this.migratedLegacyApiKey = legacyApiKey;
         }
-        const migratedDocument = {
+        const currentDocument = {
           version: legacyDocument.version ?? 1,
           settings: {
             ...(legacyDocument.settings ?? {}),
-            apiKey: ""
+            apiKey: "",
+            credentialStorageMode: "plugin-settings",
+            credentialStorageVersion: 1,
+            storedApiKey: legacyApiKey
           }
         };
-        const serialized = `${JSON.stringify(migratedDocument, null, 2)}\n`;
+        const sanitizedLegacyDocument = {
+          version: legacyDocument.version ?? 1,
+          settings: {
+            ...(legacyDocument.settings ?? {}),
+            apiKey: "",
+            storedApiKey: ""
+          }
+        };
         if (shouldSeedCurrentSettings) {
-          await fs.writeText(this.dataPath, serialized);
+          await fs.writeText(this.dataPath, `${JSON.stringify(currentDocument, null, 2)}\n`);
           shouldSeedCurrentSettings = false;
         }
-        await fs.writeText(legacySettingsPath, serialized);
+        await fs.writeText(legacySettingsPath, `${JSON.stringify(sanitizedLegacyDocument, null, 2)}\n`);
         await this.diagnostics.info("legacy plugin settings migrated", {
           legacyPluginId,
           legacySettingsPath,
@@ -1171,8 +1192,8 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       setting.addDescription(t.credentialStorageDescription);
       setting.addSelect((select) => {
         const options: Array<[CredentialStorageMode, string]> = [
-          ["session", t.credentialSession],
-          ["plugin-settings", t.credentialPluginSettings]
+          ["plugin-settings", t.credentialPluginSettings],
+          ["session", t.credentialSession]
         ];
         for (const [value, label] of options) {
           const option = document.createElement("option");

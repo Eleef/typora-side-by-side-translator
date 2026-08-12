@@ -28,6 +28,7 @@ const TRANSLATION_SETTINGS: PluginSettingsData = {
   targetLang: "zh-CN",
   uiLanguage: "auto",
   credentialStorageMode: "session",
+  credentialStorageVersion: 1,
   storedApiKey: "",
   sessionCredentialConfigured: true,
   translationDisclosureAccepted: true,

@@ -7,6 +7,7 @@ import { createStableCacheKey } from "../src/files/CacheKey";
 import { UserFacingError } from "../src/i18n/UserFacingError";
 import { TRANSLATION_BLOCK_ID_ALGORITHM } from "../src/markdown/BlockIdentity";
 import { sanitizeDiagnosticMeta } from "../src/security/DiagnosticSanitizer";
+import { resolveCredentialStoragePolicy } from "../src/security/CredentialStoragePolicy";
 import { normalizeAndValidateBaseUrl } from "../src/security/EndpointPolicy";
 import { SessionCredentialStore } from "../src/security/SessionCredentialStore";
 import { ExplicitTranslationAuthorizer } from "../src/translation/ExplicitTranslationAuthorizer";
@@ -40,6 +41,7 @@ const TRANSLATION_SETTINGS = {
   targetLang: "zh-CN" as const,
   uiLanguage: "auto" as const,
   credentialStorageMode: "session" as const,
+  credentialStorageVersion: 1,
   storedApiKey: "",
   sessionCredentialConfigured: true,
   translationDisclosureAccepted: true,
@@ -147,6 +149,27 @@ test("session credentials are scoped to one endpoint origin", () => {
   );
 });
 
+test("legacy credential settings migrate once to local plaintext persistence", () => {
+  assert.deepEqual(resolveCredentialStoragePolicy("session", 0), {
+    mode: "plugin-settings",
+    version: 1,
+    migrated: true
+  });
+  assert.deepEqual(resolveCredentialStoragePolicy(undefined, undefined), {
+    mode: "plugin-settings",
+    version: 1,
+    migrated: true
+  });
+});
+
+test("an explicit session-only choice survives later starts", () => {
+  assert.deepEqual(resolveCredentialStoragePolicy("session", 1), {
+    mode: "session",
+    version: 1,
+    migrated: false
+  });
+});
+
 test("target languages use a fixed allowlist and stable export suffixes", () => {
   assert.deepEqual(
     TARGET_LANGUAGES.map((language) => language.code),
@@ -194,6 +217,7 @@ test("translation provider rejects implicit requests before fetch", async () => 
           targetLang: "zh-CN",
           uiLanguage: "auto",
           credentialStorageMode: "session",
+          credentialStorageVersion: 1,
           storedApiKey: "",
           sessionCredentialConfigured: true,
           translationDisclosureAccepted: true,

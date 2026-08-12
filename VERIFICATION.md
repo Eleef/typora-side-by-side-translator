@@ -23,7 +23,7 @@ npm run check
 - `build/typora-side-by-side-translator/manifest.json` 存在
 - `build/typora-side-by-side-translator/style.css` 存在
 - 严格类型检查通过
-- 运行时安全、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 61 项
+- 运行时安全、凭据策略迁移、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 65 项
 - 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
 
 版本候选验证：
@@ -251,19 +251,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 
 1. 先配置 `baseUrl`，再输入 API key
 2. 关闭并重新打开设置页，确认当前会话仍可使用
-3. 保持“仅当前 Typora 会话”并重启 Typora
-4. 再输入测试 key，选择“保存在插件设置中（明文）”，完全退出并重启 Typora
+3. 保持默认“本地保存（明文）”，完全退出并重启 Typora
+4. 切换到“不保存（仅当前 Typora 会话）”，再输入测试 key，完全退出并重启 Typora
 5. 将 `baseUrl` 改到另一个域名
 6. 点击“删除 API key”
 
 期望：
 
+- 默认插件设置模式重启后显示已恢复状态，且可以继续发起明确授权的翻译请求
 - 会话模式重启后 API key 为空，需要重新输入
-- 插件设置模式重启后显示已恢复状态，且可以继续发起明确授权的翻译请求
 - 不同服务来源不能复用旧 key；更换来源会同时清除内存和已保存 key
 - 删除操作同时清除当前会话 key 和已保存 key
 - 插件设置文件中 `apiKey` 始终为空字符串
-- 只有主动选择插件设置模式时，设置文件中的 `storedApiKey` 才包含明文测试 key；默认会话模式下该字段为空
+- 默认插件设置模式下，设置文件中的 `storedApiKey` 包含明文测试 key；主动选择会话模式后该字段为空
 
 ### 10.1 目标语言与缓存隔离
 
@@ -332,4 +332,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 当前共享滚动依赖块级最小高度对齐，属于可读同步，不是像素级双编辑器对齐
 - 当前右栏渲染使用 `markdown-it`，视觉上不会完全等同 Typora 原生渲染
 - 当前右栏缓存文件保留内部控制注释，仅导出文件为纯净 Markdown
-- 当前 Typora 社区插件宿主没有可用的系统安全凭据桥；跨重启保存只能由用户主动接受明文插件设置模式，默认必须保持会话模式
+- 当前 Typora 社区插件宿主没有可用的系统安全凭据桥；默认跨重启保存依赖明文插件设置，设置页必须明确披露风险并提供会话模式

@@ -22,8 +22,8 @@ Never include real API keys, private Markdown, unredacted diagnostic logs, or fu
 
 - Translation requests are sent directly from Typora to the endpoint configured by the user.
 - Remote endpoints require HTTPS; loopback-hosted local services may use HTTP.
-- Session mode is the default and holds API keys in memory for one Typora session.
-- Optional plugin-settings mode stores the API key in plaintext in the current user's community plugin data. Enable it only when restart convenience outweighs protection from other programs running as the same Windows user.
+- Plugin-settings mode is the default and stores the API key in plaintext in the current user's community plugin data so it survives restarts and updates. Other programs running as the same Windows user can read it.
+- Optional session mode holds the API key in memory for one Typora session and is recommended when local-at-rest secrecy outweighs restart convenience.
 - Changing the API service origin, switching back to session mode, or using the delete action removes the saved key. Marketplace uninstall and code replacement do not remove plugin data; use **Erase all local plugin data** before uninstalling when settings, caches, and logs must be removed.
 - The first network translation requires explicit data-transfer consent and names the configured service origin.
 - Translation cache and diagnostic logs are local files and can be cleared from plugin settings. Current-document cleanup affects only the active target language.

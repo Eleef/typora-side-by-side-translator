@@ -121,7 +121,32 @@ try {
 
   [IO.File]::WriteAllText(
     $pluginSettingsPath,
-    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageMode":"plugin-settings","storedApiKey":"placeholder-value"}}',
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageVersion":1}}',
+    $utf8WithoutBom
+  )
+  $defaultLocalInstallOutput = @(& (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash)
+  if ($LASTEXITCODE -ne 0 -or ($defaultLocalInstallOutput -join "`n") -notmatch "credential_retention=plaintext-empty") {
+    throw "Installer did not recognize the inherited local-persistence default."
+  }
+
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageVersion":1,"sessionCredentialConfigured":true}}',
+    $utf8WithoutBom
+  )
+  try {
+    & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash
+    throw "Installer unexpectedly accepted an inconsistent local credential state."
+  }
+  catch {
+    if ($_.Exception.Message -notmatch "session-only") {
+      throw
+    }
+  }
+
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageVersion":1,"storedApiKey":"placeholder-value"}}',
     $utf8WithoutBom
   )
   $settingsHashBeforeInstall = Get-Sha256 $pluginSettingsPath
@@ -169,6 +194,7 @@ try {
   Write-Output "windows_installer_smoke=passed"
   Write-Output "windows_zip_installer_smoke=passed"
   Write-Output "windows_session_credential_guard=passed"
+  Write-Output "windows_default_local_credential_mode=passed"
   Write-Output "windows_persisted_settings_preservation=passed"
 }
 finally {

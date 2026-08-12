@@ -52,7 +52,7 @@ jobs:
           else
             channel="Windows stable release"
           fi
-          notes="${channel}. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are session-only by default; users may explicitly opt into plaintext plugin-settings storage. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
+          notes="${channel}. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are stored in plaintext local plugin settings by default; session-only storage remains available. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
           args=(--verify-tag --title "${GITHUB_REF_NAME}" --generate-notes --notes "${notes}")
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             args+=(--prerelease)
