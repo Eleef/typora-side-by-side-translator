@@ -16,11 +16,11 @@
       "ko": "한국어"
     },
     "targetShort": {
-      "zh-CN": "중간",
-      "zh-TW": "중번",
+      "zh-CN": "简",
+      "zh-TW": "繁",
       "en": "EN",
-      "ja": "일",
-      "ko": "한"
+      "ja": "日",
+      "ko": "韩"
     }
   },
   "commands": {
@@ -33,10 +33,19 @@
   "pane": {
     "resizeHandle": "드래그하여 너비 조절, 두 번 클릭하여 50/50 복원",
     "openToolbar": "번역 도구 모음 열기",
+    "moreActions": "더 보기",
     "translateAll": "전체 번역",
+    "translateTo": "{language}(으)로 번역",
     "refreshStale": "변경 블록 새로 고침",
+    "updateChanges": "{count}개 업데이트",
+    "retry": "다시 시도",
     "cancelTranslation": "취소",
     "exportTarget": "내보내기",
+    "retranslateAll": "전체 다시 번역",
+    "layout": "화면 비율",
+    "sourceWider": "원문 넓게",
+    "equalWidth": "같은 너비",
+    "translationWider": "번역문 넓게",
     "targetLanguage": "대상 언어",
     "mountFailed": "Typora 편집 영역을 찾지 못해 번역 창을 표시할 수 없습니다.",
     "initializeFailed": "번역 창을 초기화하지 못했습니다.",
@@ -83,9 +92,9 @@
     "timeoutDescription": "번역 요청 1회의 제한 시간(밀리초).",
     "paneWidthDescription": "오른쪽 번역 창 너비 비율이며 35-65 범위로 제한됩니다.",
     "toolbarMode": "도구 모음 표시",
-    "toolbarModeDescription": "항상 보이는 간단한 도구 모음 또는 접힌 도구 모음을 선택합니다.",
+    "toolbarModeDescription": "항상 보이는 간단한 도구 모음 또는 마우스를 올리면 펼쳐지는 버블을 선택합니다.",
     "toolbarCompact": "간단히",
-    "toolbarCollapsed": "접기",
+    "toolbarCollapsed": "호버 버블",
     "translationCache": "번역 캐시",
     "calculatingCache": "캐시 사용량 계산 중...",
     "cacheCalculationFailed": "캐시 사용량을 계산하지 못했습니다: {error}",

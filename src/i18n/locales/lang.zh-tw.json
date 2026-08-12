@@ -16,11 +16,11 @@
       "ko": "韓文"
     },
     "targetShort": {
-      "zh-CN": "中簡",
-      "zh-TW": "中繁",
+      "zh-CN": "简",
+      "zh-TW": "繁",
       "en": "EN",
       "ja": "日",
-      "ko": "韓"
+      "ko": "韩"
     }
   },
   "commands": {
@@ -33,10 +33,19 @@
   "pane": {
     "resizeHandle": "拖曳調整比例，按兩下恢復 50/50",
     "openToolbar": "開啟翻譯工具列",
+    "moreActions": "更多",
     "translateAll": "全文翻譯",
+    "translateTo": "翻譯為{language}",
     "refreshStale": "重新整理變更區塊",
+    "updateChanges": "更新 {count} 處",
+    "retry": "重試",
     "cancelTranslation": "取消翻譯",
     "exportTarget": "匯出譯文",
+    "retranslateAll": "全文重新翻譯",
+    "layout": "頁面比例",
+    "sourceWider": "原文較寬",
+    "equalWidth": "左右等寬",
+    "translationWider": "譯文較寬",
     "targetLanguage": "目標語言",
     "mountFailed": "找不到 Typora 編輯區容器，無法掛載譯文面板。",
     "initializeFailed": "譯文面板初始化失敗。",
@@ -83,9 +92,9 @@
     "timeoutDescription": "單次翻譯請求逾時，單位為毫秒。",
     "paneWidthDescription": "右側譯文面板寬度百分比，範圍 35-65。",
     "toolbarMode": "工具列顯示",
-    "toolbarModeDescription": "選擇持續顯示的精簡工具列或摺疊工具列。",
+    "toolbarModeDescription": "選擇持續顯示的精簡工具列，或滑鼠移入後展開的懸浮氣泡。",
     "toolbarCompact": "精簡",
-    "toolbarCollapsed": "摺疊",
+    "toolbarCollapsed": "懸浮氣泡",
     "translationCache": "翻譯快取",
     "calculatingCache": "正在統計快取...",
     "cacheCalculationFailed": "快取統計失敗：{error}",

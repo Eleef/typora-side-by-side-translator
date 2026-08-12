@@ -16,11 +16,11 @@
       "ko": "Korean"
     },
     "targetShort": {
-      "zh-CN": "ZH-S",
-      "zh-TW": "ZH-T",
+      "zh-CN": "简",
+      "zh-TW": "繁",
       "en": "EN",
-      "ja": "JA",
-      "ko": "KO"
+      "ja": "日",
+      "ko": "韩"
     }
   },
   "commands": {
@@ -33,10 +33,19 @@
   "pane": {
     "resizeHandle": "Drag to resize; double-click to restore 50/50",
     "openToolbar": "Open translation toolbar",
+    "moreActions": "More",
     "translateAll": "Translate All",
+    "translateTo": "Translate to {language}",
     "refreshStale": "Refresh Stale",
+    "updateChanges": "Update {count}",
+    "retry": "Retry",
     "cancelTranslation": "Cancel",
     "exportTarget": "Export",
+    "retranslateAll": "Retranslate all",
+    "layout": "Layout",
+    "sourceWider": "Source wider",
+    "equalWidth": "Equal width",
+    "translationWider": "Translation wider",
     "targetLanguage": "Target language",
     "mountFailed": "The Typora writing area was not found, so the translation pane could not be mounted.",
     "initializeFailed": "The translation pane could not be initialized.",
@@ -83,9 +92,9 @@
     "timeoutDescription": "Timeout for one translation request, in milliseconds.",
     "paneWidthDescription": "Translation pane width percentage, limited to 35-65.",
     "toolbarMode": "Toolbar display",
-    "toolbarModeDescription": "Choose an always-visible compact toolbar or a collapsed toolbar.",
+    "toolbarModeDescription": "Choose an always-visible compact toolbar or a hover bubble with cascading actions.",
     "toolbarCompact": "Compact",
-    "toolbarCollapsed": "Collapsed",
+    "toolbarCollapsed": "Hover bubble",
     "translationCache": "Translation cache",
     "calculatingCache": "Calculating cache usage...",
     "cacheCalculationFailed": "Could not calculate cache usage: {error}",

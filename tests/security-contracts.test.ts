@@ -43,7 +43,8 @@ const TRANSLATION_SETTINGS = {
   storedApiKey: "",
   translationDisclosureAccepted: true,
   paneWidthPercent: 50,
-  toolbarDisplayMode: "compact" as const
+  toolbarDisplayMode: "compact" as const,
+  toolbarInteractionVersion: 1
 };
 
 const TRANSLATION_BLOCKS = [{ id: "block-1", sourceMarkdown: "Hello" }];
@@ -195,7 +196,8 @@ test("translation provider rejects implicit requests before fetch", async () => 
           storedApiKey: "",
           translationDisclosureAccepted: true,
           paneWidthPercent: 50,
-          toolbarDisplayMode: "compact"
+          toolbarDisplayMode: "compact",
+          toolbarInteractionVersion: 1
         },
         [{ id: "block-1", sourceMarkdown: "Hello" }]
       ),

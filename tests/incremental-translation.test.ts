@@ -31,7 +31,8 @@ const TRANSLATION_SETTINGS: PluginSettingsData = {
   storedApiKey: "",
   translationDisclosureAccepted: true,
   paneWidthPercent: 50,
-  toolbarDisplayMode: "compact"
+  toolbarDisplayMode: "compact",
+  toolbarInteractionVersion: 1
 };
 const ASSOCIATION: FileAssociation = {
   sourcePath: "/source/article.md",

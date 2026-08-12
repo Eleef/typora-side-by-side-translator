@@ -63,6 +63,7 @@ export interface PluginSettingsData {
   translationDisclosureAccepted: boolean;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
+  toolbarInteractionVersion: number;
 }
 
 export interface FileAssociation {
@@ -107,6 +108,7 @@ export interface PaneRenderState {
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
   isTranslating: boolean;
+  retryMode?: "full" | "stale";
   errorMessage?: string;
   warningMessage?: string;
   infoMessage?: string;

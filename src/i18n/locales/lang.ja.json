@@ -16,11 +16,11 @@
       "ko": "韓国語"
     },
     "targetShort": {
-      "zh-CN": "中簡",
-      "zh-TW": "中繁",
+      "zh-CN": "简",
+      "zh-TW": "繁",
       "en": "EN",
       "ja": "日",
-      "ko": "韓"
+      "ko": "韩"
     }
   },
   "commands": {
@@ -33,10 +33,19 @@
   "pane": {
     "resizeHandle": "ドラッグで幅を変更、ダブルクリックで 50/50 に戻す",
     "openToolbar": "翻訳ツールバーを開く",
+    "moreActions": "その他",
     "translateAll": "全文を翻訳",
+    "translateTo": "{language}に翻訳",
     "refreshStale": "変更箇所を更新",
+    "updateChanges": "{count} 件を更新",
+    "retry": "再試行",
     "cancelTranslation": "キャンセル",
     "exportTarget": "エクスポート",
+    "retranslateAll": "全文を再翻訳",
+    "layout": "表示比率",
+    "sourceWider": "原文を広く",
+    "equalWidth": "左右同じ幅",
+    "translationWider": "訳文を広く",
     "targetLanguage": "翻訳先言語",
     "mountFailed": "Typora の編集領域が見つからないため、翻訳ペインを表示できません。",
     "initializeFailed": "翻訳ペインを初期化できませんでした。",
@@ -83,9 +92,9 @@
     "timeoutDescription": "1 回の翻訳リクエストのタイムアウト（ミリ秒）。",
     "paneWidthDescription": "右側翻訳ペインの幅。35～65% の範囲です。",
     "toolbarMode": "ツールバー表示",
-    "toolbarModeDescription": "常時表示するコンパクト表示か折りたたみ表示を選択します。",
+    "toolbarModeDescription": "常時表示するコンパクト表示、またはマウスを重ねると展開するバブルを選択します。",
     "toolbarCompact": "コンパクト",
-    "toolbarCollapsed": "折りたたみ",
+    "toolbarCollapsed": "ホバーバブル",
     "translationCache": "翻訳キャッシュ",
     "calculatingCache": "キャッシュ使用量を計算中...",
     "cacheCalculationFailed": "キャッシュ使用量を計算できませんでした：{error}",

@@ -41,7 +41,8 @@ const DEFAULT_SETTINGS: PluginSettingsData = {
   storedApiKey: "",
   translationDisclosureAccepted: false,
   paneWidthPercent: 50,
-  toolbarDisplayMode: "compact"
+  toolbarDisplayMode: "collapsed",
+  toolbarInteractionVersion: 0
 };
 
 export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSettingsData> {
@@ -76,7 +77,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     staleCount: 0,
     targetLang: "zh-CN",
     paneWidthPercent: 50,
-    toolbarDisplayMode: "compact",
+    toolbarDisplayMode: "collapsed",
     isTranslating: false
   };
 
@@ -183,7 +184,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       storedApiKey: this.settingsStore.get("storedApiKey") || "",
       translationDisclosureAccepted: Boolean(this.settingsStore.get("translationDisclosureAccepted")),
       paneWidthPercent: this.normalizePaneWidth(this.settingsStore.get("paneWidthPercent")),
-      toolbarDisplayMode: this.normalizeToolbarDisplayMode(this.settingsStore.get("toolbarDisplayMode"))
+      toolbarDisplayMode: this.normalizeToolbarDisplayMode(this.settingsStore.get("toolbarDisplayMode")),
+      toolbarInteractionVersion: this.settingsStore.get("toolbarInteractionVersion")
     };
   }
 
@@ -361,6 +363,11 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     this.settingsStore = new PluginSettings<PluginSettingsData>(this.app, this.manifest, { version: 1 });
     this.settingsStore.setDefault(DEFAULT_SETTINGS);
     this.settingsStore.load();
+    const toolbarInteractionVersion = Number(this.settingsStore.get("toolbarInteractionVersion"));
+    if (!Number.isFinite(toolbarInteractionVersion) || toolbarInteractionVersion < 1) {
+      this.settingsStore.set("toolbarDisplayMode", "collapsed");
+      this.settingsStore.set("toolbarInteractionVersion", 1);
+    }
     this.settingsStore.set("targetLang", normalizeTargetLanguage(this.settingsStore.get("targetLang")));
     this.settingsStore.set("uiLanguage", normalizeUiLanguage(this.settingsStore.get("uiLanguage")));
     this.settingsStore.set(
@@ -581,6 +588,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         ...this.renderState,
         isVisible: true,
         isTranslating: false,
+        retryMode: undefined,
         warningMessage: undefined,
         infoMessage: undefined,
         errorMessage: this.formatUserError(error)
@@ -652,7 +660,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         ...this.renderState,
         association,
         isVisible: true,
-        errorMessage: this.getAssociationReason(association.reason)
+        errorMessage: this.getAssociationReason(association.reason),
+        retryMode: undefined
       };
       this.paneVisible = true;
       this.paneController.render(this.renderState);
@@ -690,6 +699,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
       targetLang: association.targetLang,
       isTranslating: true,
+      retryMode: undefined,
       errorMessage: undefined,
       infoMessage: undefined,
       warningMessage:
@@ -733,6 +743,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
         toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
         isTranslating: false,
+        retryMode: undefined,
         infoMessage:
           staleCount === 0
             ? this.localizer.format(this.localizer.t.messages.cacheUpdated, { path: association.cacheTargetPath })
@@ -760,6 +771,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         association,
         isVisible: true,
         isTranslating: false,
+        retryMode: isTranslationCancelled(error) ? undefined : mode,
         warningMessage: undefined,
         infoMessage: isTranslationCancelled(error) ? this.localizer.t.messages.translationCancelled : undefined,
         errorMessage: isTranslationCancelled(error) ? undefined : this.formatUserError(error)
@@ -797,7 +809,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         ...this.renderState,
         association,
         isVisible: true,
-        errorMessage: this.localizer.t.messages.exportRequiresTranslation
+        errorMessage: this.localizer.t.messages.exportRequiresTranslation,
+        retryMode: undefined
       };
       this.paneVisible = true;
       this.paneController.render(this.renderState);
@@ -815,6 +828,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
           association,
           isVisible: true,
           errorMessage: undefined,
+          retryMode: undefined,
           infoMessage: this.localizer.t.messages.exportCancelled
         };
         this.paneController.render(this.renderState);
@@ -835,6 +849,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         association,
         isVisible: true,
         errorMessage: undefined,
+        retryMode: undefined,
         warningMessage: undefined,
         infoMessage: this.localizer.format(this.localizer.t.messages.exported, { path: association.exportTargetPath })
       };
@@ -846,7 +861,8 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         isVisible: true,
         warningMessage: undefined,
         infoMessage: undefined,
-        errorMessage: this.formatUserError(error)
+        errorMessage: this.formatUserError(error),
+        retryMode: undefined
       };
     }
     this.paneController.render(this.renderState);
@@ -938,7 +954,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   private normalizeToolbarDisplayMode(value: unknown): "compact" | "collapsed" {
-    return value === "collapsed" ? "collapsed" : "compact";
+    return value === "compact" ? "compact" : "collapsed";
   }
 
   private normalizeCredentialStorageMode(value: unknown): CredentialStorageMode {

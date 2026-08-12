@@ -18,6 +18,7 @@ interface PaneActions {
 
 type StatusBadgeKind = "idle" | "cached" | "stale" | "error";
 type ToolbarDisplayMode = "compact" | "collapsed";
+type PrimaryAction = "translate-all" | "refresh-stale" | "cancel-translation";
 
 export class TranslationPaneController {
   private readonly markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
@@ -40,10 +41,16 @@ export class TranslationPaneController {
   private windowResizeHandler: (() => void) | null = null;
   private layoutSyncFrame: number | null = null;
   private toolbarExpanded = false;
+  private toolbarCollapseTimer: number | null = null;
+  private moreMenuOpen = false;
+  private primaryAction: PrimaryAction | null = null;
+  private lastState: PaneRenderState | null = null;
   private currentPaneWidth = 50;
   private originalParent: HTMLElement | null = null;
   private originalNextSibling: ChildNode | null = null;
   private resizeDragCleanup: (() => void) | null = null;
+  private documentMouseDownHandler: ((event: MouseEvent) => void) | null = null;
+  private documentKeyDownHandler: ((event: KeyboardEvent) => void) | null = null;
 
   public constructor(private readonly localizer: PluginLocalizer) {}
 
@@ -54,10 +61,9 @@ export class TranslationPaneController {
     const { pane } = this.localizer.t;
     this.resizeHandle.title = pane.resizeHandle;
     const labels: Array<[string, string]> = [
-      ['[data-action="translate-all"]', pane.translateAll],
-      ['[data-action="refresh-stale"]', pane.refreshStale],
-      ['[data-action="cancel-translation"]', pane.cancelTranslation],
-      ['[data-action="export-target"]', pane.exportTarget]
+      ['[data-action="translate-all"]', pane.retranslateAll],
+      ['[data-action="export-target"]', pane.exportTarget],
+      ['[data-action="toggle-more"]', pane.moreActions]
     ];
     for (const [selector, label] of labels) {
       const button = this.pane.querySelector<HTMLButtonElement>(selector);
@@ -67,10 +73,30 @@ export class TranslationPaneController {
     }
     const collapsedToggle = this.pane.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
     collapsedToggle?.setAttribute("aria-label", pane.openToolbar);
+    const layoutLabel = this.pane.querySelector<HTMLElement>(".typora-bilingual-pane__layout-cascade .typora-bilingual-pane__cascade-trigger");
+    if (layoutLabel) {
+      layoutLabel.textContent = pane.layout;
+    }
+    const languageTrigger = this.pane.querySelector<HTMLButtonElement>(".typora-bilingual-pane__language-cascade .typora-bilingual-pane__cascade-trigger");
+    if (languageTrigger) {
+      languageTrigger.textContent = pane.targetLanguage;
+    }
     const languageSelect = this.pane.querySelector<HTMLSelectElement>('[data-action="target-language"]');
     languageSelect?.setAttribute("aria-label", pane.targetLanguage);
     for (const option of Array.from(languageSelect?.options ?? [])) {
-      option.textContent = this.localizer.targetLanguageLabel(option.value as TargetLanguage);
+      const language = option.value as TargetLanguage;
+      option.textContent = this.localizer.targetLanguageShortLabel(language);
+      option.title = this.localizer.targetLanguageLabel(language);
+    }
+    for (const button of Array.from(this.pane.querySelectorAll<HTMLButtonElement>("[data-target-language]"))) {
+      const language = button.dataset.targetLanguage as TargetLanguage;
+      button.textContent = this.localizer.targetLanguageShortLabel(language);
+      button.title = this.localizer.targetLanguageLabel(language);
+      button.setAttribute("aria-label", this.localizer.targetLanguageLabel(language));
+    }
+    this.refreshPresetLabels();
+    if (this.lastState) {
+      this.renderControls(this.lastState);
     }
   }
 
@@ -116,23 +142,38 @@ export class TranslationPaneController {
       '<div class="typora-bilingual-pane__overlay">',
       '  <button class="typora-bilingual-pane__collapsed-toggle" data-action="toggle-toolbar" type="button"></button>',
       '  <div class="typora-bilingual-pane__toolbar">',
-      '    <div class="typora-bilingual-pane__actions">',
-      '      <button class="typora-bilingual-pane__button" data-action="translate-all" type="button"></button>',
-      '      <button class="typora-bilingual-pane__button" data-action="refresh-stale" type="button"></button>',
-      '      <button class="typora-bilingual-pane__button is-hidden" data-action="cancel-translation" type="button"></button>',
-      '      <button class="typora-bilingual-pane__button" data-action="export-target" type="button"></button>',
-      "    </div>",
-      '    <div class="typora-bilingual-pane__controls-row">',
-      '      <select class="typora-bilingual-pane__language" data-action="target-language">',
-      ...TARGET_LANGUAGES.map((language) => `        <option value="${language.code}"></option>`),
-      "      </select>",
-      '      <div class="typora-bilingual-pane__presets">',
-      '        <button class="typora-bilingual-pane__preset" data-preset="60" type="button">40/60</button>',
-      '        <button class="typora-bilingual-pane__preset" data-preset="50" type="button">50/50</button>',
-      '        <button class="typora-bilingual-pane__preset" data-preset="40" type="button">60/40</button>',
+      '      <div class="typora-bilingual-pane__summary">',
+      '        <select class="typora-bilingual-pane__language" data-action="target-language">',
+      ...TARGET_LANGUAGES.map((language) => `          <option value="${language.code}"></option>`),
+      "        </select>",
+      '        <div class="typora-bilingual-pane__status-badge" data-kind="idle" role="status" aria-live="polite"></div>',
       "      </div>",
-      '      <div class="typora-bilingual-pane__status-badge" data-kind="idle" role="status" aria-live="polite"></div>',
-      "    </div>",
+      '      <button class="typora-bilingual-pane__button typora-bilingual-pane__primary is-hidden" data-action="primary" type="button"></button>',
+      '      <div class="typora-bilingual-pane__more">',
+      '        <button class="typora-bilingual-pane__more-toggle" data-action="toggle-more" type="button" aria-haspopup="menu" aria-expanded="false"></button>',
+      '        <div class="typora-bilingual-pane__menu is-hidden" role="menu">',
+      '          <div class="typora-bilingual-pane__cascade typora-bilingual-pane__language-cascade">',
+      '            <button class="typora-bilingual-pane__cascade-trigger" type="button"></button>',
+      '            <div class="typora-bilingual-pane__cascade-options typora-bilingual-pane__language-options">',
+      ...TARGET_LANGUAGES.map(
+        (language) =>
+          `              <button class="typora-bilingual-pane__cascade-option" data-target-language="${language.code}" type="button"></button>`
+      ),
+      "            </div>",
+      "          </div>",
+      '          <button class="typora-bilingual-pane__menu-item" data-action="export-target" type="button" role="menuitem"></button>',
+      '          <button class="typora-bilingual-pane__menu-item" data-action="translate-all" type="button" role="menuitem"></button>',
+      '          <div class="typora-bilingual-pane__menu-separator"></div>',
+      '          <div class="typora-bilingual-pane__cascade typora-bilingual-pane__layout-cascade">',
+      '            <button class="typora-bilingual-pane__cascade-trigger typora-bilingual-pane__menu-label" type="button"></button>',
+      '            <div class="typora-bilingual-pane__cascade-options typora-bilingual-pane__presets">',
+      '              <button class="typora-bilingual-pane__preset" data-preset="60" type="button">40/60</button>',
+      '              <button class="typora-bilingual-pane__preset" data-preset="50" type="button">50/50</button>',
+      '              <button class="typora-bilingual-pane__preset" data-preset="40" type="button">60/40</button>',
+      "            </div>",
+      "          </div>",
+      "        </div>",
+      "      </div>",
       "  </div>",
       '  <div class="typora-bilingual-pane__message is-hidden" role="alert" aria-live="assertive"></div>',
       "</div>",
@@ -150,6 +191,7 @@ export class TranslationPaneController {
     pane.addEventListener("change", (event) => {
       const select = event.target as HTMLSelectElement;
       if (select.dataset.action === "target-language") {
+        this.closeAfterAction();
         actions.onTargetLanguageChange(select.value as TargetLanguage);
       }
     });
@@ -157,27 +199,39 @@ export class TranslationPaneController {
     pane.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
       const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
+      if (action === "primary") {
+        this.invokePrimaryAction();
+        return;
+      }
       if (action === "translate-all") {
+        this.closeAfterAction();
         actions.onTranslateAll();
         return;
       }
-      if (action === "refresh-stale") {
-        actions.onRefreshStale();
-        return;
-      }
-      if (action === "cancel-translation") {
-        actions.onCancelTranslation();
-        return;
-      }
       if (action === "export-target") {
+        this.closeAfterAction();
         actions.onExportTarget();
         return;
       }
 
       if (action === "toggle-toolbar") {
-        this.toolbarExpanded = !this.toolbarExpanded;
-        this.syncToolbarMode();
-        this.scheduleLayoutSync();
+        if (this.toolbarExpanded) {
+          this.closeTransientControls();
+        } else {
+          this.openCollapsedToolbar();
+        }
+        return;
+      }
+      if (action === "toggle-more") {
+        this.moreMenuOpen = !this.moreMenuOpen;
+        this.syncMoreMenu();
+        return;
+      }
+
+      const targetLanguage = target.closest<HTMLElement>("[data-target-language]")?.dataset.targetLanguage;
+      if (targetLanguage) {
+        this.closeAfterAction();
+        actions.onTargetLanguageChange(targetLanguage as TargetLanguage);
         return;
       }
 
@@ -187,6 +241,7 @@ export class TranslationPaneController {
         if (Number.isFinite(nextWidth)) {
           this.applyPaneWidth(nextWidth, true);
         }
+        this.closeMoreMenu();
         return;
       }
 
@@ -197,21 +252,31 @@ export class TranslationPaneController {
       }
     });
 
-    overlayEl.addEventListener("mouseenter", () => {
-      if ((this.pane?.dataset.toolbarMode as ToolbarDisplayMode | undefined) === "collapsed") {
-        this.toolbarExpanded = true;
-        this.syncToolbarMode();
-        this.scheduleLayoutSync();
+    const collapsedToggle = pane.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
+    const toolbar = pane.querySelector<HTMLDivElement>(".typora-bilingual-pane__toolbar");
+    collapsedToggle?.addEventListener("mouseenter", () => this.openCollapsedToolbar());
+    collapsedToggle?.addEventListener("mouseleave", () => this.scheduleCollapsedToolbarClose());
+    toolbar?.addEventListener("mouseenter", () => this.openCollapsedToolbar());
+    toolbar?.addEventListener("mouseleave", () => this.scheduleCollapsedToolbarClose());
+    overlayEl.addEventListener("focusin", () => this.openCollapsedToolbar());
+    overlayEl.addEventListener("focusout", (event) => {
+      if (!overlayEl.contains(event.relatedTarget as Node | null)) {
+        this.scheduleCollapsedToolbarClose();
       }
     });
 
-    overlayEl.addEventListener("mouseleave", () => {
-      if ((this.pane?.dataset.toolbarMode as ToolbarDisplayMode | undefined) === "collapsed") {
-        this.toolbarExpanded = false;
-        this.syncToolbarMode();
-        this.scheduleLayoutSync();
+    this.documentMouseDownHandler = (event) => {
+      if (this.overlayEl && !this.overlayEl.contains(event.target as Node)) {
+        this.closeTransientControls();
       }
-    });
+    };
+    this.documentKeyDownHandler = (event) => {
+      if (event.key === "Escape") {
+        this.closeTransientControls();
+      }
+    };
+    document.addEventListener("mousedown", this.documentMouseDownHandler);
+    document.addEventListener("keydown", this.documentKeyDownHandler);
 
     this.bindResize(resizeHandle);
 
@@ -241,6 +306,15 @@ export class TranslationPaneController {
     }
     this.resizeDragCleanup?.();
     this.resizeDragCleanup = null;
+    this.clearToolbarCollapseTimer();
+    if (this.documentMouseDownHandler) {
+      document.removeEventListener("mousedown", this.documentMouseDownHandler);
+      this.documentMouseDownHandler = null;
+    }
+    if (this.documentKeyDownHandler) {
+      document.removeEventListener("keydown", this.documentKeyDownHandler);
+      this.documentKeyDownHandler = null;
+    }
 
     const source = this.sourceContainer;
     const originalParent = this.originalParent;
@@ -267,6 +341,9 @@ export class TranslationPaneController {
     this.actions = null;
     this.activeBlockId = null;
     this.toolbarExpanded = false;
+    this.moreMenuOpen = false;
+    this.primaryAction = null;
+    this.lastState = null;
     this.scrollRoot = window;
   }
 
@@ -281,35 +358,41 @@ export class TranslationPaneController {
     this.host.classList.toggle("is-pane-hidden", !state.isVisible);
     this.pane.classList.toggle("is-hidden", !state.isVisible);
     if (!state.isVisible) {
+      this.closeTransientControls();
       return;
     }
 
+    this.lastState = state;
+    const previousToolbarMode = this.pane.dataset.toolbarMode as ToolbarDisplayMode | undefined;
     this.pane.dataset.toolbarMode = state.toolbarDisplayMode;
-    const translateButton = this.pane.querySelector<HTMLButtonElement>('[data-action="translate-all"]');
-    const refreshButton = this.pane.querySelector<HTMLButtonElement>('[data-action="refresh-stale"]');
-    const cancelButton = this.pane.querySelector<HTMLButtonElement>('[data-action="cancel-translation"]');
     const languageSelect = this.pane.querySelector<HTMLSelectElement>('[data-action="target-language"]');
     const collapsedToggle = this.pane.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
-    if (translateButton && refreshButton && cancelButton) {
-      translateButton.disabled = state.isTranslating;
-      refreshButton.disabled = state.isTranslating;
-      cancelButton.classList.toggle("is-hidden", !state.isTranslating);
-    }
     if (languageSelect) {
       languageSelect.value = state.targetLang;
       languageSelect.disabled = state.isTranslating;
+      languageSelect.title = this.localizer.targetLanguageLabel(state.targetLang);
     }
+    for (const button of Array.from(this.pane.querySelectorAll<HTMLButtonElement>("[data-target-language]"))) {
+      const isActive = button.dataset.targetLanguage === state.targetLang;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    }
+    if (state.toolbarDisplayMode === "collapsed" && previousToolbarMode !== "collapsed") {
+      this.toolbarExpanded = false;
+    }
+    const unsupportedReason = !state.association?.isSupportedSource
+      ? this.associationReason(state.association?.reason)
+      : null;
     if (collapsedToggle) {
-      collapsedToggle.textContent = this.localizer.targetLanguageShortLabel(state.targetLang);
+      const presentation = this.getStatusPresentation(state, unsupportedReason, "");
+      collapsedToggle.textContent = `${this.localizer.targetLanguageShortLabel(state.targetLang)} · ${presentation.label}`;
     }
+    this.renderStatus(state, unsupportedReason);
+    this.renderControls(state);
     if (state.toolbarDisplayMode === "compact") {
       this.toolbarExpanded = true;
     }
     this.syncToolbarMode();
-    const unsupportedReason = !state.association?.isSupportedSource
-      ? this.associationReason(state.association?.reason)
-      : null;
-    this.renderStatus(state, unsupportedReason);
     this.renderPresetState(state.paneWidthPercent);
 
     this.paneBody.innerHTML = "";
@@ -597,6 +680,159 @@ export class TranslationPaneController {
     return this.localizer.t.pane.unsupportedFile;
   }
 
+  private renderControls(state: PaneRenderState): void {
+    if (!this.pane) {
+      return;
+    }
+    const primaryButton = this.pane.querySelector<HTMLButtonElement>('[data-action="primary"]');
+    const retranslateButton = this.pane.querySelector<HTMLButtonElement>('[data-action="translate-all"]');
+    const exportButton = this.pane.querySelector<HTMLButtonElement>('[data-action="export-target"]');
+    if (!primaryButton || !retranslateButton || !exportButton) {
+      return;
+    }
+
+    const supported = state.association?.isSupportedSource === true;
+    const hasTranslation = Boolean(state.targetMarkdown);
+    let action: PrimaryAction | null = null;
+    let label = "";
+    if (state.isTranslating) {
+      action = "cancel-translation";
+      label = this.localizer.t.pane.cancelTranslation;
+    } else if (state.retryMode) {
+      action = state.retryMode === "stale" ? "refresh-stale" : "translate-all";
+      label = this.localizer.t.pane.retry;
+    } else if (supported && !hasTranslation) {
+      action = "translate-all";
+      label = this.localizer.format(this.localizer.t.pane.translateTo, {
+        language: this.localizer.targetLanguageShortLabel(state.targetLang)
+      });
+    } else if (supported && state.staleCount > 0) {
+      action = "refresh-stale";
+      label = this.localizer.format(this.localizer.t.pane.updateChanges, { count: state.staleCount });
+    } else if (supported && hasTranslation) {
+      action = "translate-all";
+      label = this.localizer.t.pane.retranslateAll;
+    }
+
+    this.primaryAction = action;
+    primaryButton.textContent = label;
+    primaryButton.classList.toggle("is-hidden", !action);
+    primaryButton.dataset.kind = action === "cancel-translation" ? "cancel" : action === null ? "" : "action";
+    retranslateButton.textContent = this.localizer.t.pane.retranslateAll;
+    retranslateButton.disabled = state.isTranslating || !supported;
+    retranslateButton.classList.toggle("is-hidden", action === "translate-all");
+    exportButton.textContent = this.localizer.t.pane.exportTarget;
+    exportButton.disabled = state.isTranslating || !hasTranslation;
+    this.syncMoreMenu();
+  }
+
+  private invokePrimaryAction(): void {
+    if (!this.actions || !this.primaryAction) {
+      return;
+    }
+    const action = this.primaryAction;
+    this.closeAfterAction();
+    if (action === "translate-all") {
+      this.actions.onTranslateAll();
+    } else if (action === "refresh-stale") {
+      this.actions.onRefreshStale();
+    } else {
+      this.actions.onCancelTranslation();
+    }
+  }
+
+  private closeAfterAction(): void {
+    this.closeMoreMenu();
+    if (this.pane?.dataset.toolbarMode === "collapsed") {
+      this.clearToolbarCollapseTimer();
+      this.toolbarExpanded = false;
+      this.syncToolbarMode();
+    }
+  }
+
+  private closeMoreMenu(): void {
+    if (!this.moreMenuOpen) {
+      return;
+    }
+    this.moreMenuOpen = false;
+    this.syncMoreMenu();
+  }
+
+  private closeTransientControls(): void {
+    this.clearToolbarCollapseTimer();
+    const wasExpanded = this.toolbarExpanded;
+    this.closeMoreMenu();
+    if (this.pane?.dataset.toolbarMode === "collapsed") {
+      this.toolbarExpanded = false;
+    }
+    if (wasExpanded !== this.toolbarExpanded) {
+      this.syncToolbarMode();
+      this.scheduleLayoutSync();
+    }
+  }
+
+  private openCollapsedToolbar(): void {
+    if (this.pane?.dataset.toolbarMode !== "collapsed") {
+      return;
+    }
+    this.clearToolbarCollapseTimer();
+    this.toolbarExpanded = true;
+    this.moreMenuOpen = true;
+    this.syncToolbarMode();
+    this.syncMoreMenu();
+    this.scheduleLayoutSync();
+  }
+
+  private scheduleCollapsedToolbarClose(): void {
+    if (this.pane?.dataset.toolbarMode !== "collapsed") {
+      return;
+    }
+    this.clearToolbarCollapseTimer();
+    this.toolbarCollapseTimer = window.setTimeout(() => {
+      this.toolbarCollapseTimer = null;
+      this.closeTransientControls();
+    }, 200);
+  }
+
+  private clearToolbarCollapseTimer(): void {
+    if (this.toolbarCollapseTimer !== null) {
+      window.clearTimeout(this.toolbarCollapseTimer);
+      this.toolbarCollapseTimer = null;
+    }
+  }
+
+  private syncMoreMenu(): void {
+    if (!this.pane) {
+      return;
+    }
+    const toggle = this.pane.querySelector<HTMLButtonElement>('[data-action="toggle-more"]');
+    const menu = this.pane.querySelector<HTMLDivElement>(".typora-bilingual-pane__menu");
+    if (!toggle || !menu) {
+      return;
+    }
+    toggle.textContent = this.localizer.t.pane.moreActions;
+    toggle.title = this.localizer.t.pane.moreActions;
+    toggle.setAttribute("aria-expanded", String(this.moreMenuOpen));
+    menu.classList.toggle("is-hidden", !this.moreMenuOpen);
+  }
+
+  private refreshPresetLabels(): void {
+    if (!this.pane) {
+      return;
+    }
+    const labels: Record<string, string> = {
+      "60": this.localizer.t.pane.translationWider,
+      "50": this.localizer.t.pane.equalWidth,
+      "40": this.localizer.t.pane.sourceWider
+    };
+    for (const button of Array.from(this.pane.querySelectorAll<HTMLButtonElement>(".typora-bilingual-pane__preset"))) {
+      const ratio = button.textContent?.match(/\d+\/\d+/)?.[0] ?? "";
+      const description = labels[button.dataset.preset ?? ""];
+      button.title = description;
+      button.setAttribute("aria-label", `${description} ${ratio}`.trim());
+    }
+  }
+
   private syncToolbarMode(): void {
     if (!this.pane || !this.overlayEl) {
       return;
@@ -611,6 +847,10 @@ export class TranslationPaneController {
     }
 
     const expanded = toolbarMode === "compact" ? true : this.toolbarExpanded;
+    if (!expanded) {
+      this.moreMenuOpen = false;
+      this.syncMoreMenu();
+    }
     this.overlayEl.dataset.toolbarMode = toolbarMode;
     this.overlayEl.dataset.expanded = String(expanded);
     collapsedToggle.classList.toggle("is-hidden", toolbarMode === "compact");
