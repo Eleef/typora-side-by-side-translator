@@ -3,7 +3,8 @@ param (
   [string] $TyporaHome = "",
   [string] $CommunityRoot = "",
   [string] $PackagePath = "",
-  [string] $ExpectedSha256 = ""
+  [string] $ExpectedSha256 = "",
+  [switch] $AcceptSessionCredentialLoss
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +20,7 @@ $pluginId = "eleef.typora-side-by-side-translator"
 $legacyPluginIds = @("eleef.typora-side-by-side-translation", "typora-bilingual", "jiang.typora-bilingual")
 $target = [IO.Path]::GetFullPath((Join-Path $pluginsRoot $pluginId))
 $staging = [IO.Path]::GetFullPath((Join-Path $pluginsRoot "$pluginId.installing"))
+$pluginSettingsPath = [IO.Path]::GetFullPath((Join-Path $communityRootPath "settings\data\$pluginId.json"))
 $doctor = Join-Path $PSScriptRoot "doctor.ps1"
 $packageRootFiles = @("manifest.json", "main.js", "style.css")
 $localeFiles = @("lang.en.json", "lang.ja.json", "lang.ko.json", "lang.zh-cn.json", "lang.zh-tw.json")
@@ -75,6 +77,40 @@ if ($PackagePath) {
 }
 
 $runningWindow = Get-Process Typora -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
+$settingsHashBeforeInstall = $null
+if ((Test-Path -LiteralPath $target -PathType Container) -and (Test-Path -LiteralPath $pluginSettingsPath -PathType Leaf)) {
+  try {
+    $settingsDocument = Get-Content -LiteralPath $pluginSettingsPath -Raw | ConvertFrom-Json
+  }
+  catch {
+    throw "Plugin settings are invalid JSON; no plugin files were changed: $pluginSettingsPath"
+  }
+
+  $settingsHashBeforeInstall = Get-Sha256 $pluginSettingsPath
+  $settings = $settingsDocument.settings
+  $storageMode = if ($settings.credentialStorageMode) { [string]$settings.credentialStorageMode } else { "session" }
+  $hasStoredApiKey = $storageMode -eq "plugin-settings" -and -not [string]::IsNullOrWhiteSpace([string]$settings.storedApiKey)
+  $hasProviderConfiguration = -not [string]::IsNullOrWhiteSpace([string]$settings.baseUrl) -and -not [string]::IsNullOrWhiteSpace([string]$settings.model)
+  $hasSessionMarker = $null -ne $settings.PSObject.Properties["sessionCredentialConfigured"]
+  $hasSessionCredentialRisk = if ($hasSessionMarker) { [bool]$settings.sessionCredentialConfigured } else { $hasProviderConfiguration }
+
+  if ($hasSessionCredentialRisk -and -not $hasStoredApiKey -and -not $AcceptSessionCredentialLoss) {
+    if ($runningWindow) {
+      throw "The API key is session-only. Before closing Typora, open this plugin's settings and select 'Save in plugin settings (plaintext)', or rerun with -AcceptSessionCredentialLoss if re-entering the key after installation is acceptable."
+    }
+    throw "The configured API key was session-only and cannot survive a closed Typora session. Reopen Typora and enter the key again, then select 'Save in plugin settings (plaintext)' before the next update; or rerun now with -AcceptSessionCredentialLoss."
+  }
+
+  $credentialRetention = if ($hasStoredApiKey) {
+    "plaintext-persisted"
+  } elseif ($hasSessionCredentialRisk) {
+    "session-loss-accepted"
+  } else {
+    "session-empty"
+  }
+  Write-Output "credential_retention=$credentialRetention"
+}
+
 if ($runningWindow) {
   throw "Typora is open. Close Typora before installing the plugin."
 }
@@ -151,6 +187,17 @@ if (Test-Path $target) {
 }
 Move-Item -LiteralPath $staging -Destination $target
 Write-Output "verified_installed_file_hashes=$($packageFiles -join ',')"
+
+if ($settingsHashBeforeInstall) {
+  if (-not (Test-Path -LiteralPath $pluginSettingsPath -PathType Leaf)) {
+    throw "Plugin settings disappeared during installation: $pluginSettingsPath"
+  }
+  $settingsHashAfterInstall = Get-Sha256 $pluginSettingsPath
+  if ($settingsHashAfterInstall -ne $settingsHashBeforeInstall) {
+    throw "Plugin settings changed during installation: $pluginSettingsPath"
+  }
+  Write-Output "verified_settings_preserved=true"
+}
 
 foreach ($legacyName in $legacyPluginIds) {
   $legacyPath = [IO.Path]::GetFullPath((Join-Path $pluginsRoot $legacyName))

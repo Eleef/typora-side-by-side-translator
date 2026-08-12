@@ -51,7 +51,7 @@ Windows 安装器回归：
 npm run test:windows-installer
 ```
 
-该测试会构造隔离的 Typora/社区市场目录，验证健康安装、自动启用和无 BOM 写入，并确认缺少市场注入或启用配置带 BOM 时 `doctor` 必须失败。
+该测试会构造隔离的 Typora/社区市场目录，验证健康安装、自动启用、无 BOM 写入、会话密钥升级阻止和持久设置完整保留，并确认缺少市场注入或启用配置带 BOM 时 `doctor` 必须失败。
 
 ## 安装验证
 
@@ -73,6 +73,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 构建目录与安装目录中的 `main.js`、`manifest.json`、`style.css` 及五个 `locales/*.json` SHA-256 分别一致
 - 完整 `doctor` 确认最低版本门槛、已验证组合和插件启动日志标记
 - 安装目录 `manifest.json` 的版本为 `0.1.0-alpha.3`，并与本轮构建一致
+- 已有安装采用会话 key 且服务配置完整时，安装器在修改插件文件前停止；显式增加 `-AcceptSessionCredentialLoss` 才允许接受安装后重新输入
+- 已有安装采用明文插件设置模式时，安装器输出 `verified_settings_preserved=true`，设置文件 SHA-256 在升级前后完全一致
 
 重启 Typora 后继续确认：
 

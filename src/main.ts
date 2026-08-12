@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS: PluginSettingsData = {
   uiLanguage: "auto",
   credentialStorageMode: "session",
   storedApiKey: "",
+  sessionCredentialConfigured: false,
   translationDisclosureAccepted: false,
   paneWidthPercent: 50,
   toolbarDisplayMode: "collapsed",
@@ -182,6 +183,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       uiLanguage: normalizeUiLanguage(this.settingsStore.get("uiLanguage")),
       credentialStorageMode: this.normalizeCredentialStorageMode(this.settingsStore.get("credentialStorageMode")),
       storedApiKey: this.settingsStore.get("storedApiKey") || "",
+      sessionCredentialConfigured: Boolean(this.settingsStore.get("sessionCredentialConfigured")),
       translationDisclosureAccepted: Boolean(this.settingsStore.get("translationDisclosureAccepted")),
       paneWidthPercent: this.normalizePaneWidth(this.settingsStore.get("paneWidthPercent")),
       toolbarDisplayMode: this.normalizeToolbarDisplayMode(this.settingsStore.get("toolbarDisplayMode")),
@@ -190,7 +192,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   public async updateSetting<K extends keyof PluginSettingsData>(key: K, value: PluginSettingsData[K]): Promise<void> {
-    if (key === "storedApiKey") {
+    if (key === "storedApiKey" || key === "sessionCredentialConfigured") {
       throw new Error(this.localizer.t.messages.persistedApiKeyInternalOnly);
     }
     if (key === "apiKey") {
@@ -224,6 +226,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       if (previousOrigin !== nextOrigin) {
         this.sessionCredentials.clear();
         this.clearStoredCredential();
+        this.settingsStore.set("sessionCredentialConfigured", false);
       }
     }
     this.settingsStore.save();
@@ -287,6 +290,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     this.sessionCredentials.clear();
     this.clearStoredCredential();
     this.settingsStore.set("apiKey", "");
+    this.settingsStore.set("sessionCredentialConfigured", false);
     this.settingsStore.save();
     await this.diagnostics.info("API key cleared");
   }
@@ -378,12 +382,17 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     if (persistedApiKey) {
       try {
         this.sessionCredentials.set(this.settingsStore.get("baseUrl"), persistedApiKey);
+        this.settingsStore.set("sessionCredentialConfigured", true);
       } catch {
         this.sessionCredentials.clear();
+        this.settingsStore.set("sessionCredentialConfigured", false);
       }
       this.settingsStore.set("apiKey", "");
       this.settingsStore.save();
       this.removedPersistedApiKey = true;
+    } else if (this.settingsStore.get("credentialStorageMode") === "session") {
+      // A session key cannot survive a completed Typora restart.
+      this.settingsStore.set("sessionCredentialConfigured", false);
     }
     if (
       this.settingsStore.get("credentialStorageMode") === "plugin-settings" &&
@@ -392,9 +401,11 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       try {
         const baseUrl = this.settingsStore.get("baseUrl");
         this.sessionCredentials.set(baseUrl, this.settingsStore.get("storedApiKey"));
+        this.settingsStore.set("sessionCredentialConfigured", true);
       } catch {
         this.sessionCredentials.clear();
         this.clearStoredCredential();
+        this.settingsStore.set("sessionCredentialConfigured", false);
         await this.diagnostics.warn("stored API key was invalid and has been cleared");
       }
     }
@@ -407,6 +418,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     const normalizedValue = value.trim();
     this.sessionCredentials.set(baseUrl, normalizedValue);
     this.settingsStore.set("apiKey", "");
+    this.settingsStore.set("sessionCredentialConfigured", Boolean(normalizedValue));
     this.settingsStore.set(
       "storedApiKey",
       normalizedValue && this.settingsStore.get("credentialStorageMode") === "plugin-settings" ? normalizedValue : ""

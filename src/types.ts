@@ -60,6 +60,7 @@ export interface PluginSettingsData {
   uiLanguage: UiLanguage;
   credentialStorageMode: CredentialStorageMode;
   storedApiKey: string;
+  sessionCredentialConfigured: boolean;
   translationDisclosureAccepted: boolean;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";

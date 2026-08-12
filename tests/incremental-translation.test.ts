@@ -29,6 +29,7 @@ const TRANSLATION_SETTINGS: PluginSettingsData = {
   uiLanguage: "auto",
   credentialStorageMode: "session",
   storedApiKey: "",
+  sessionCredentialConfigured: true,
   translationDisclosureAccepted: true,
   paneWidthPercent: 50,
   toolbarDisplayMode: "compact",

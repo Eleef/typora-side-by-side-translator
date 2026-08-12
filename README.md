@@ -53,6 +53,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-plugin.ps1 -Packag
 
 The installer checks the community loader, verifies the ZIP checksum and package structure, installs the plugin, enables it, and runs the post-install doctor.
 
+Before upgrading an existing installation, check the API-key storage mode in plugin settings. A session-only key cannot survive closing Typora, so the installer stops and asks you to select **Plugin settings (plaintext)** first. If re-entering the key after installation is acceptable, explicitly append `-AcceptSessionCredentialLoss`. The installer verifies that persisted plugin settings are byte-for-byte unchanged by the upgrade.
+
 ### Install From Source
 
 Install `typora-community-plugin` first, completely close Typora, and then run:
@@ -74,7 +76,7 @@ The installer verifies that the community marketplace loader is present, copies 
 
 1. Open a saved local `.md` file in Typora.
 2. Open the community plugin settings, choose the interface and target languages, then configure `baseUrl`, `apiKey`, `model`, and `timeoutMs`.
-3. Keep the API key session-only, or explicitly select **Save in plugin settings (plaintext)** when restart convenience outweighs local-at-rest secrecy.
+3. Keep the API key session-only and re-enter it after closing, restarting, or updating Typora, or explicitly select **Save in plugin settings (plaintext)** when restart convenience outweighs local-at-rest secrecy.
 4. Open the community command panel. In the verified setup the shortcut is `F2`.
 5. Search for **Side-by-Side Translator** and run **Toggle Pane**.
 6. Run **Translate Current File** to create the selected language's cached translation.
@@ -106,9 +108,9 @@ The source language is detected by the configured model. The target is selected 
 - Before the first network translation, the plugin names the configured service and requires explicit data-transfer consent; declining sends nothing.
 - Requests go directly from Typora to the configured provider; this project operates no proxy.
 - Remote endpoints must use HTTPS. Plain HTTP is allowed only for `localhost`, `127.0.0.1`, and `::1`.
-- Session mode keeps the API key only in memory and remains the default. The optional plugin-settings mode stores the key in plaintext in the current user's community plugin data; other programs running as that Windows user can read it.
+- Session mode keeps the API key only in memory and remains the default; it cannot be recovered after closing, restarting, or updating Typora. The optional plugin-settings mode stores the key in plaintext in the current user's community plugin data; other programs running as that Windows user can read it.
 - Changing the API service origin clears both the in-memory and saved key. Switching back to session mode or using the explicit delete action also removes the saved value.
-- Reinstalling or uninstalling plugin code does not remove community settings, caches, or logs. Use **Erase all local plugin data** in the plugin settings before uninstalling when local data must be removed.
+- Reinstalling or uninstalling plugin code does not remove community settings, caches, or logs. The upgrade installer verifies that persisted settings are unchanged, but a session key held only in memory disappears when Typora closes. Use **Erase all local plugin data** in the plugin settings before uninstalling when local data must be removed.
 - Translation cache is stored under `%USERPROFILE%\.typora\community-plugins\settings\data\eleef.typora-side-by-side-translator\translations`.
 - **Clear current document** removes only the active target language's cache pair. The settings page can also clear all translation caches, diagnostic logs, or all plugin-local data; exported Markdown files are never deleted.
 - Diagnostic logs redact credentials, local paths, URL query parameters, and sensitive error details.

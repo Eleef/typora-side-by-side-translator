@@ -6,6 +6,7 @@ $typoraHome = Join-Path $sandbox "Typora"
 $communityRoot = Join-Path $sandbox "community-plugins"
 $windowHtml = Join-Path $typoraHome "resources\window.html"
 $pluginStatesPath = Join-Path $communityRoot "settings\plugins.json"
+$pluginSettingsPath = Join-Path $communityRoot "settings\data\eleef.typora-side-by-side-translator.json"
 $releaseZip = Join-Path $workspace "release\plugin.zip"
 $utf8WithoutBom = [Text.UTF8Encoding]::new($false)
 $utf8WithBom = [Text.UTF8Encoding]::new($true)
@@ -77,6 +78,53 @@ try {
     throw "Release package is required for ZIP installer smoke: $releaseZip"
   }
   $releaseHash = Get-Sha256 $releaseZip
+  New-Item -ItemType Directory -Force (Split-Path $pluginSettingsPath -Parent) | Out-Null
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageMode":"session","storedApiKey":"","sessionCredentialConfigured":true}}',
+    $utf8WithoutBom
+  )
+  try {
+    & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash
+    throw "Installer unexpectedly accepted a session-only credential during upgrade."
+  }
+  catch {
+    if ($_.Exception.Message -notmatch "session-only") {
+      throw
+    }
+  }
+
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageMode":"session","storedApiKey":""}}',
+    $utf8WithoutBom
+  )
+  try {
+    & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash
+    throw "Installer unexpectedly accepted legacy session settings without the credential marker."
+  }
+  catch {
+    if ($_.Exception.Message -notmatch "session-only") {
+      throw
+    }
+  }
+
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageMode":"session","storedApiKey":"","sessionCredentialConfigured":false}}',
+    $utf8WithoutBom
+  )
+  $emptySessionInstallOutput = @(& (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 $releaseHash)
+  if ($LASTEXITCODE -ne 0 -or ($emptySessionInstallOutput -join "`n") -notmatch "credential_retention=session-empty") {
+    throw "Installer rejected a session-mode installation that had never received an API key."
+  }
+
+  [IO.File]::WriteAllText(
+    $pluginSettingsPath,
+    '{"version":1,"settings":{"baseUrl":"https://example.invalid/v1","model":"example-model","credentialStorageMode":"plugin-settings","storedApiKey":"placeholder-value"}}',
+    $utf8WithoutBom
+  )
+  $settingsHashBeforeInstall = Get-Sha256 $pluginSettingsPath
   try {
     & (Join-Path $workspace "scripts\install-plugin.ps1") -TyporaHome $typoraHome -CommunityRoot $communityRoot -PackagePath $releaseZip -ExpectedSha256 ("0" * 64)
     throw "Installer unexpectedly accepted an incorrect package checksum."
@@ -94,6 +142,12 @@ try {
   }
   if (($zipInstallOutput -join "`n") -notmatch [Regex]::Escape("installed_version=$projectVersion") -or ($zipInstallOutput -join "`n") -notmatch "install_source=zip") {
     throw "Installer did not complete its post-install verification for the ZIP source."
+  }
+  if (($zipInstallOutput -join "`n") -notmatch "credential_retention=plaintext-persisted" -or ($zipInstallOutput -join "`n") -notmatch "verified_settings_preserved=true") {
+    throw "Installer did not report credential retention and settings preservation."
+  }
+  if ((Get-Sha256 $pluginSettingsPath) -ne $settingsHashBeforeInstall) {
+    throw "Installer changed persisted plugin settings during upgrade."
   }
   $installedManifest = Get-Content -LiteralPath (Join-Path $communityRoot "plugins\eleef.typora-side-by-side-translator\manifest.json") -Raw | ConvertFrom-Json
   if ($installedManifest.version -ne $projectVersion) {
@@ -114,6 +168,8 @@ try {
 
   Write-Output "windows_installer_smoke=passed"
   Write-Output "windows_zip_installer_smoke=passed"
+  Write-Output "windows_session_credential_guard=passed"
+  Write-Output "windows_persisted_settings_preservation=passed"
 }
 finally {
   if (Test-Path $sandbox) {
