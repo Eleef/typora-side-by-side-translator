@@ -8,7 +8,7 @@
 
 _Windows 上 Typora 1.14.9 的实拍界面：左侧保持原生编辑，右侧并排显示缓存的只读译文。_
 
-> **Alpha 阶段：**核心流程已在下方 Windows 组合中运行。插件尚未进入社区插件市场，也尚未完成外部用户测试。
+> **Alpha 阶段：**核心流程已在 Windows 真机验证。macOS 的打包、安装和诊断已具备自动化候选，但尚未完成真实 Typora on macOS 验证。插件还未进入社区插件市场。
 
 当前开发版本：**`0.1.0-alpha.3`**。插件设置页顶部也会显示实际安装版本。
 
@@ -27,23 +27,28 @@ _Windows 上 Typora 1.14.9 的实拍界面：左侧保持原生编辑，右侧�
 
 ### 环境要求
 
-| 组件 | 当前已验证环境 |
-|---|---|
-| 操作系统 | Windows 10/11 |
-| Typora | 1.14.9 |
-| [typora-community-plugin](https://github.com/typora-community-plugin/typora-community-plugin) | 2.9.14 |
-| 源码安装使用的 Node.js | 24 |
+| 平台 | 状态 | 当前证据 |
+|---|---|---|
+| Windows 10/11 | Alpha 支持 | Typora 1.14.9 + `typora-community-plugin` 2.9.14 真机 smoke |
+| macOS | 候选，尚未真机验证 | `darwin` 清单和 Mac 安装/诊断脚本；CI 门禁已定义，远端运行待验证 |
+| Linux | 不支持 | 尚无安装器和宿主验证 |
 
-Manifest 的最低门槛为 Typora `1.12.4` 和社区核心 `2.5.28`，但这不代表所有更高版本组合都已验证。当前不支持 macOS 和 Linux。
+Manifest 最低门槛为 Typora `1.12.4` 和社区核心 `2.5.28`；它们只是安装门槛，不代表所有更高版本组合均已验证。源码安装使用 Node.js 24。
 
 ### 安装已发布的 Alpha 包
 
-先安装 `typora-community-plugin`，打开 [Releases 页面](https://github.com/Eleef/typora-side-by-side-translator/releases)，选择一个已发布版本，并从同一版本下载以下四个文件放在一个目录。仓库源码可能领先于最近发布的 Alpha；验证当前开发版本时请使用下方“从源码安装”。
+先安装 `typora-community-plugin`，打开 [Releases 页面](https://github.com/Eleef/typora-side-by-side-translator/releases)，选择一个已发布版本，并从同一版本下载对应平台需要的文件。仓库源码可能领先于最近发布的 Alpha；验证当前开发版本时请使用下方“从源码安装”。
+
+macOS 资产会从包含本轮候选代码的下一次 Release 开始提供；更早的 Alpha Release 只有 Windows 脚本。
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
 - `install-plugin.ps1`
 - `doctor.ps1`
+- `install-plugin-macos.sh`
+- `doctor-macos.sh`
+
+#### Windows
 
 完全退出 Typora，在该目录打开 PowerShell，然后执行：
 
@@ -57,9 +62,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-plugin.ps1 -Packag
 
 升级已有安装前，请先在插件设置中检查 API key 保存方式。新版默认使用“本地保存（明文，默认）”，覆盖安装会保留该设置。若主动选择“不保存（仅当前 Typora 会话）”，关闭 Typora 后 key 无法恢复，安装器会停止并提示先切回本地保存；若接受安装后重新输入，可在安装命令末尾显式增加 `-AcceptSessionCredentialLoss`。安装器会校验持久化设置文件在升级前后完全不变。
 
+#### macOS 候选
+
+先使用社区框架官方脚本安装加载器。该脚本需要在 macOS「系统设置 → 隐私与安全性 → App 管理」中允许 Terminal 修改应用，因为它要向 `Typora.app` 注入加载器。完全退出 Typora 后执行：
+
+```bash
+checksum=$(awk '$2 == "plugin.zip" { print $1 }' SHA256SUMS.txt)
+chmod +x install-plugin-macos.sh doctor-macos.sh
+./install-plugin-macos.sh --package ./plugin.zip --expected-sha256 "$checksum"
+```
+
+Intel 与 Apple Silicon 使用同一份 `plugin.zip`；插件是 JavaScript，不含按 CPU 架构编译的原生模块。安装器会使用 Typora 实际的 macOS 用户数据目录，检查社区加载器和安装包、启用插件、保留持久设置并运行 Mac 健康检查。该流程仍然**没有在真实 Typora on macOS 中验证**。
+
 ### 从源码安装
 
-先安装 `typora-community-plugin`，完全退出 Typora，然后执行：
+先安装 `typora-community-plugin`，完全退出 Typora，然后按平台执行。
+
+Windows：
 
 ```powershell
 npm ci
@@ -74,11 +93,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 %USERPROFILE%\.typora\community-plugins\plugins\eleef.typora-side-by-side-translator
 ```
 
+macOS 候选：
+
+```bash
+npm ci
+npm run ci
+./scripts/doctor-macos.sh --mode Community
+./scripts/install-plugin-macos.sh
+```
+
+macOS 默认插件目录为：
+
+```text
+~/Library/Application Support/abnerworks.Typora/plugins/plugins/eleef.typora-side-by-side-translator
+```
+
 ### 使用
 
 1. 在 Typora 中打开已保存的本地 `.md` 文件。
 2. 打开社区插件设置，分别选择界面语言和目标语言，再填写 `baseUrl`、`apiKey`、`model` 和 `timeoutMs`。
-3. API key 默认“本地保存（明文）”，关闭、重启或更新后仍可恢复；同一 Windows 用户下的其他程序可以读取。若本机静态保密高于便利性，可选择“不保存（仅当前 Typora 会话）”。
+3. API key 默认“本地保存（明文）”，关闭、重启或更新后仍可恢复；同一系统用户下的其他程序可以读取。若本机静态保密高于便利性，可选择“不保存（仅当前 Typora 会话）”。
 4. 打开社区命令面板；在已验证环境中快捷键是 `F2`。
 5. 搜索 **Side-by-Side Translator**，执行 **Toggle Pane**。
 6. 执行 **Translate Current File**，生成当前目标语言的缓存译文。
@@ -110,10 +144,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 - 第一次联网翻译前，插件会显示当前配置的服务并要求用户明确同意发送数据；拒绝后不会发出请求。
 - 请求由 Typora 直接发送到用户配置的服务，本项目不运营中转服务器。
 - 远程地址必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 和 `::1` 可以使用 HTTP。
-- 本地插件设置是默认值，会在当前用户的社区插件数据中明文保存 API key；同一 Windows 用户下运行的其他程序可以读取。可选的会话模式只在内存中保留 key，关闭、重启或更新 Typora 后无法恢复。
+- 本地插件设置是默认值，会在当前用户的社区插件数据中明文保存 API key；同一系统用户下运行的其他程序可以读取。可选的会话模式只在内存中保留 key，关闭、重启或更新 Typora 后无法恢复。
 - 更换 API 服务来源会清除内存和已保存的 key；切回会话模式或点击显式删除也会移除已保存值。
 - 覆盖安装或卸载插件代码都不会删除社区插件设置、缓存和日志。升级安装器会验证持久设置文件安装前后完全一致；但只存在内存中的会话 key 会随 Typora 关闭而消失。如需清除本地数据，应在卸载前通过插件设置执行 **清除全部插件本地数据**。
-- 翻译缓存位于 `%USERPROFILE%\.typora\community-plugins\settings\data\eleef.typora-side-by-side-translator\translations`。
+- 翻译缓存位于社区插件设置数据目录下：Windows 已验证布局为 `%USERPROFILE%\.typora\community-plugins\settings\data\...`，macOS 候选布局为 `~/Library/Application Support/abnerworks.Typora/plugins/settings/data/...`。
 - **清理当前文档** 只删除当前目标语言的缓存译文和映射。设置页还可以清理全部翻译缓存、诊断日志或全部插件本地数据；已导出的 Markdown 不会被删除。
 - 诊断日志会隐藏凭据、本机路径、网址查询参数和敏感错误详情。
 - 右侧只读窗格会转义 Markdown 原始 HTML，并用严格白名单净化渲染结果；可执行标记和外部资源元素会被移除。
@@ -127,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 - 只支持已保存的本地 `.md` 文件，不支持未命名文档和远程文件。
 - 当前不提供原文语言手动指定或自动选择目标语言，原文识别交给配置的模型。
 - 右侧窗格只读，不会逐键自动翻译。
-- Alpha 版本只支持 Windows。
+- Windows 是当前正式支持的 Alpha 平台；macOS 为代码和安装候选，真实 Typora UI 与运行行为尚未验证。
 - Alpha 已支持从 GitHub Release 安装；社区市场安装将在正式 `0.1.0` 发布后推进。
 
 ## 故障排查
@@ -136,6 +170,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+```
+
+macOS：
+
+```bash
+./scripts/doctor-macos.sh --redact-paths
 ```
 
 Typora 更新可能替换 `typora-community-plugin` 修改过的应用 HTML，导致插件市场和全部社区插件消失。如果健康检查显示 `community-market.injection` 失败，请完全关闭 Typora，并针对更新后的 Typora 重新安装当前官方社区加载器。不要用旧版 Typora HTML 覆盖新版文件。
@@ -150,12 +190,13 @@ npm test
 npm run build
 npm run package
 npm run test:windows-installer
+npm run test:macos-installer
 npm run version:set -- <version>
 $env:RELEASE_TAG = "<version>"
 npm run check:release
 ```
 
-`npm run package` 当前会生成包含 `manifest.json`、`main.js`、`style.css` 和 `locales/` 目录的 `release/plugin.zip`，五套界面语言资源作为独立文件随包发布。安装器和发布检查会逐个校验这些语言文件。完整真机检查见 [VERIFICATION.md](./VERIFICATION.md)，贡献代码前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，安全问题报告方式见 [SECURITY.md](./SECURITY.md)。
+`npm run package` 只生成一份与 CPU 架构无关的 `release/plugin.zip`，其中包含 `manifest.json`、`main.js`、`style.css` 和五套 `locales/` 资源。Windows 与 macOS 安装器检查同一个包。完整证据矩阵及尚未完成的 Mac 真机检查见 [VERIFICATION.md](./VERIFICATION.md)。
 
 仓库还包含符合 GitHub 社交分享图尺寸的 [social-preview.png](./docs/assets/social-preview.png)，可在仓库设置中直接上传。
 

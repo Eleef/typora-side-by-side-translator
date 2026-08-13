@@ -7,7 +7,9 @@ const checksumFilename = "SHA256SUMS.txt";
 const releaseFiles = [
   { name: "plugin.zip", relativePath: path.join("release", "plugin.zip") },
   { name: "install-plugin.ps1", relativePath: path.join("scripts", "install-plugin.ps1") },
-  { name: "doctor.ps1", relativePath: path.join("scripts", "doctor.ps1") }
+  { name: "doctor.ps1", relativePath: path.join("scripts", "doctor.ps1") },
+  { name: "install-plugin-macos.sh", relativePath: path.join("scripts", "install-plugin-macos.sh") },
+  { name: "doctor-macos.sh", relativePath: path.join("scripts", "doctor-macos.sh") }
 ];
 
 function sha256Buffer(buffer) {

@@ -126,6 +126,7 @@ async function verifyPublishedRelease(options, fetchImpl = globalThis.fetch) {
     assert(manifest.id === "eleef.typora-side-by-side-translator", `Unexpected published plugin id: ${manifest.id}`);
     assert(manifest.repo === repo, `Published manifest repo ${manifest.repo} does not match ${repo}.`);
     assert(manifest.version === version, `Published manifest version ${manifest.version} does not match ${version}.`);
+    assert(JSON.stringify(manifest.platforms) === JSON.stringify(["win32", "darwin"]), "Published manifest platform contract is incorrect.");
   } finally {
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   }

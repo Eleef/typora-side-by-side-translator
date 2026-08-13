@@ -9,6 +9,7 @@
   "minAppVersion": "1.12.4",
   "minCoreVersion": "2.5.28",
   "platforms": [
-    "win32"
+    "win32",
+    "darwin"
   ]
 }

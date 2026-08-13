@@ -12,7 +12,9 @@ function fnv1a64(input: string): string {
 
 export function createStableCacheKey(sourcePath: string, basename: string): string {
   const readable = basename.replace(/[^\w.-]+/g, "_").slice(0, 64) || "document";
-  const normalizedIdentity = sourcePath.replace(/\\/g, "/").toLowerCase();
+  const slashNormalized = sourcePath.replace(/\\/g, "/");
+  const isWindowsPath = /^[a-zA-Z]:\//.test(slashNormalized) || slashNormalized.startsWith("//");
+  const normalizedIdentity = isWindowsPath ? slashNormalized.toLowerCase() : slashNormalized;
   return `${readable}-${fnv1a64(normalizedIdentity)}`;
 }
 

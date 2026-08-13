@@ -82,6 +82,25 @@ test("Windows doctor checks the community market, compatibility and runtime mark
   assert.match(doctor, /RedactPaths/);
 });
 
+test("macOS installer and doctor follow the community runtime directory contract", () => {
+  const installer = fs.readFileSync(path.join(__dirname, "..", "scripts", "install-plugin-macos.sh"), "utf8");
+  const doctor = fs.readFileSync(path.join(__dirname, "..", "scripts", "doctor-macos.sh"), "utf8");
+
+  for (const contract of [
+    "Library/Application Support/abnerworks.Typora/plugins",
+    "expected-sha256",
+    "accept-session-credential-loss",
+    "verified_settings_preserved",
+    "darwin"
+  ]) {
+    assert.ok(`${installer}\n${doctor}`.includes(contract), `missing macOS contract: ${contract}`);
+  }
+  assert.match(installer, /osascript\s+-l\s+JavaScript/);
+  assert.match(installer, /settings_hash_before/);
+  assert.match(installer, /validate_zip_entries/);
+  assert.match(doctor, /plugin\.verified-matrix/);
+});
+
 test("persistent API key storage is the explicit plaintext default", () => {
   const pluginMain = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
   const zhLocale = fs.readFileSync(path.join(__dirname, "..", "src", "i18n", "locales", "lang.zh-cn.json"), "utf8");
@@ -90,7 +109,7 @@ test("persistent API key storage is the explicit plaintext default", () => {
   assert.match(pluginMain, /credentialStorageVersion:\s*0/);
   assert.match(zhLocale, /本地保存（明文，默认）/);
   assert.match(pluginMain, /storedApiKey/);
-  assert.match(zhLocale, /同一 Windows 用户下的其他程序可以读取/);
+  assert.match(zhLocale, /同一系统用户下的其他程序可以读取/);
   const installer = fs.readFileSync(path.join(__dirname, "..", "scripts", "install-plugin.ps1"), "utf8");
   assert.match(installer, /credentialStorageVersion/);
   assert.match(installer, /plaintext-empty/);
@@ -167,6 +186,15 @@ test("published release metadata distinguishes Alpha and stable releases", () =>
   assert.equal(validateReleaseInfo(stable, "0.1.0"), stable);
   assert.throws(() => validateReleaseInfo({ ...alpha, draft: true }, "0.1.0-alpha.1"), /still a draft/);
   assert.throws(() => validateReleaseInfo({ ...stable, prerelease: true }, "0.1.0"), /prerelease state/);
+});
+
+test("release assets include both platform installer and doctor pairs", () => {
+  const releaseChecksum = fs.readFileSync(path.join(__dirname, "..", "scripts", "release-checksum.js"), "utf8");
+  const releaseWorkflow = fs.readFileSync(path.join(__dirname, "..", ".github", "workflows", "release.yml"), "utf8");
+  for (const filename of ["install-plugin.ps1", "doctor.ps1", "install-plugin-macos.sh", "doctor-macos.sh"]) {
+    assert.match(releaseChecksum, new RegExp(filename.replaceAll(".", "\\.")));
+    assert.match(releaseWorkflow, new RegExp(filename.replaceAll(".", "\\.")));
+  }
 });
 
 test("version setter updates package, lock and plugin manifest together", () => {

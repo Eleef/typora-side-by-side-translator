@@ -9,7 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  macos-installer:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package installable plugin
+        run: npm run package
+
+      - name: Verify macOS installer and doctor
+        run: npm run test:macos-installer
+
   release:
+    needs: macos-installer
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -48,16 +70,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            channel="Windows prerelease"
+            channel="Windows-tested prerelease with macOS candidate support"
           else
-            channel="Windows stable release"
+            channel="Windows-tested release with macOS candidate support"
           fi
-          notes="${channel}. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are stored in plaintext local plugin settings by default; session-only storage remains available. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
+          notes="${channel}. macOS packaging and installer checks run on macOS CI, but the plugin has not completed a real Typora-on-macOS smoke test. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are stored in plaintext local plugin settings by default; session-only storage remains available. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
           args=(--verify-tag --title "${GITHUB_REF_NAME}" --generate-notes --notes "${notes}")
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             args+=(--prerelease)
           fi
-          gh release create "${GITHUB_REF_NAME}" release/plugin.zip release/SHA256SUMS.txt scripts/install-plugin.ps1 scripts/doctor.ps1 "${args[@]}"
+          gh release create "${GITHUB_REF_NAME}" release/plugin.zip release/SHA256SUMS.txt scripts/install-plugin.ps1 scripts/doctor.ps1 scripts/install-plugin-macos.sh scripts/doctor-macos.sh "${args[@]}"
 
       - name: Verify published release
         env:

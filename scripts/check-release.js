@@ -38,7 +38,7 @@ function assertReleaseMetadata(manifest, packageJson) {
   assert(manifest.repo === "Eleef/typora-side-by-side-translator", "Manifest repo is invalid.");
   assert(manifest.minAppVersion === "1.12.4", "Manifest minAppVersion must match the tested baseline.");
   assert(manifest.minCoreVersion === "2.5.28", "Manifest minCoreVersion is invalid.");
-  assert(JSON.stringify(manifest.platforms) === JSON.stringify(["win32"]), "Only win32 may be declared before wider smoke.");
+  assert(JSON.stringify(manifest.platforms) === JSON.stringify(["win32", "darwin"]), "Manifest platforms must declare the Windows baseline and macOS candidate.");
   assert(!("entry" in manifest), "Manifest entry is not used by the community plugin core.");
   assert(!("homepage" in manifest), "Manifest homepage is not part of the current core contract.");
   assert(packageJson.private === true, "package.json must remain private to prevent accidental npm publishing.");

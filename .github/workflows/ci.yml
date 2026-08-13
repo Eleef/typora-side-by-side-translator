@@ -60,3 +60,24 @@ jobs:
 
       - name: Verify Windows installer and doctor
         run: npm run test:windows-installer
+
+  macos-installer:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package installable plugin
+        run: npm run package
+
+      - name: Verify macOS installer and doctor
+        run: npm run test:macos-installer

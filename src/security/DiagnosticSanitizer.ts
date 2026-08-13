@@ -4,6 +4,7 @@ const SENSITIVE_KEY = /(api.?key|authorization|cookie|credential|password|secret
 const PATH_KEY = /(path|directory|dir|filename)$/i;
 const URL_KEY = /(base.?url|endpoint|url)$/i;
 const WINDOWS_PATH = /[a-zA-Z]:\\+(?:[^\s"'<>|]+\\+)*[^\s"'<>|]*/g;
+const UNIX_PATH = /(^|[\s("'=])\/(?:Users|home|tmp|private\/(?:tmp|var)|var\/folders|Volumes)\/[^\s"'<>]*/gm;
 const HTTP_URL = /https?:\/\/[^\s"'<>]+/gi;
 const BEARER_TOKEN = /Bearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const API_KEY_TOKEN = /\bsk-[A-Za-z0-9_-]{8,}\b/g;
@@ -13,7 +14,8 @@ function sanitizeString(value: string): string {
     .replace(BEARER_TOKEN, "Bearer <redacted>")
     .replace(API_KEY_TOKEN, REDACTED)
     .replace(HTTP_URL, (url) => sanitizeUrl(url))
-    .replace(WINDOWS_PATH, LOCAL_PATH);
+    .replace(WINDOWS_PATH, LOCAL_PATH)
+    .replace(UNIX_PATH, (_match, prefix: string) => `${prefix}${LOCAL_PATH}`);
 }
 
 function sanitizeUrl(value: string): string {

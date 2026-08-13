@@ -2,10 +2,11 @@
 
 ## 环境
 
-- Windows 10/11
-- Typora 1.14.9
-- typora-community-plugin 2.9.14
-- 当前组合于 2026-08-10 完成安装、加载、pane 和迁移 smoke
+| 平台 | 证据状态 | 环境或边界 |
+|---|---|---|
+| Windows 10/11 | VERIFIED | Typora 1.14.9 + typora-community-plugin 2.9.14；已完成安装、加载、pane 和迁移 smoke |
+| macOS | UNVERIFIED in Typora | `darwin` 清单、架构无关 ZIP、Mac 安装器/doctor 和 macOS CI 隔离测试已定义；没有真实 Typora-on-macOS 运行证据 |
+| Linux | Unsupported | 未声明平台，未提供安装器和宿主 smoke |
 
 ## 构建验证
 
@@ -23,7 +24,7 @@ npm run check
 - `build/typora-side-by-side-translator/manifest.json` 存在
 - `build/typora-side-by-side-translator/style.css` 存在
 - 严格类型检查通过
-- 运行时安全、凭据策略迁移、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 65 项
+- 运行时安全、凭据策略迁移、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 67 项
 - 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
 
 版本候选验证：
@@ -43,7 +44,7 @@ npm run check:release
 npm run check:published -- --version 0.1.0-alpha.3
 ```
 
-该命令检查 GitHub Release 状态、四个发布资产、每个资产的 SHA-256、ZIP 根目录、插件 ID 和安装版本。正式版本还会验证 GitHub `latest` 指向该版本。
+该命令检查 GitHub Release 状态、六个发布资产、每个资产的 SHA-256、ZIP 根目录、插件 ID 和安装版本。六个资产为共享 `plugin.zip`、校验和、Windows 安装/诊断脚本及 macOS 安装/诊断脚本。正式版本还会验证 GitHub `latest` 指向该版本。
 
 Windows 安装器回归：
 
@@ -53,7 +54,17 @@ npm run test:windows-installer
 
 该测试会构造隔离的 Typora/社区市场目录，验证健康安装、自动启用、无 BOM 写入、会话密钥升级阻止和持久设置完整保留，并确认缺少市场注入或启用配置带 BOM 时 `doctor` 必须失败。
 
+macOS 安装器回归：
+
+```bash
+npm run test:macos-installer
+```
+
+该测试在 GitHub 的 macOS runner 上构造隔离的 `Typora.app` 和社区运行目录，验证官方加载器注入形态、同一 `plugin.zip` 安装、`darwin` 清单、自动启用、持久设置哈希不变、会话密钥升级阻止及损坏安装检测。它不启动 Typora 图形界面，因此结果不能标记为 macOS 宿主 smoke。
+
 ## 安装验证
+
+### Windows
 
 命令：
 
@@ -82,6 +93,36 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 插件设置页顶部显示 **当前安装版本：0.1.0-alpha.3**
 - 命令面板显示新名称下的 5 个命令；命令标题使用当前插件界面语言
 - 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
+
+### macOS 候选
+
+先按社区框架官方说明运行 `install-macos.sh`，然后完全退出 Typora：
+
+```bash
+./scripts/doctor-macos.sh --mode Community
+checksum=$(awk '$2 == "plugin.zip" { print $1 }' release/SHA256SUMS.txt)
+./scripts/install-plugin-macos.sh --package ./release/plugin.zip --expected-sha256 "$checksum"
+./scripts/doctor-macos.sh --redact-paths
+```
+
+自动化期望：
+
+- 加载器位于 `~/Library/Application Support/abnerworks.Typora/plugins`
+- 插件位于该目录下的 `plugins/eleef.typora-side-by-side-translator`
+- `manifest.json` 声明 `darwin`，插件包与 Windows 共用且不含原生 CPU 模块
+- `settings/plugins.json` 保持有效 JSON，并启用当前插件 ID
+- 已持久化插件设置在覆盖安装前后 SHA-256 相同
+- 会话模式 key 存在丢失风险时，默认在替换代码前停止
+- doctor 可以识别加载器注入、Core、插件文件、最低版本、启用状态和启动日志标记
+
+真实 Mac 后续仍需确认：
+
+- Installed Plugins 中可见并能启用插件
+- 命令面板显示全部命令
+- pane、悬停菜单、分隔条、共享滚动和多语言布局正常
+- 全文翻译、增量刷新、取消、缓存和导出正常
+- 重启后设置按所选凭据模式恢复
+- Intel 与 Apple Silicon 至少各收集一份兼容报告；这不是当前候选代码完成的前置条件
 
 ## Smoke 场景
 
@@ -333,3 +374,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 当前右栏渲染使用 `markdown-it`，视觉上不会完全等同 Typora 原生渲染
 - 当前右栏缓存文件保留内部控制注释，仅导出文件为纯净 Markdown
 - 当前 Typora 社区插件宿主没有可用的系统安全凭据桥；默认跨重启保存依赖明文插件设置，设置页必须明确披露风险并提供会话模式
+- macOS 平台声明基于社区框架公开契约和自动化安装测试；没有真实 Mac 宿主证据前，不得在 Release 或市场文案中称为正式支持

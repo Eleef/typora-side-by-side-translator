@@ -122,6 +122,7 @@ test("diagnostics redact credentials, local paths and URL details", () => {
     storedApiKey: "plain-saved-value",
     authorization: "Bearer private-token",
     sourcePath: "C:\\Users\\alice\\private\\article.md",
+    macMessage: "Error at /Users/alice/private/main.ts",
     baseUrl: "https://api.example.com/v1?token=private",
     stack: "Error at C:\\Users\\alice\\private\\main.ts with sk-another-secret and https://api.example.com/v1/private"
   }) as Record<string, unknown>;
@@ -132,6 +133,7 @@ test("diagnostics redact credentials, local paths and URL details", () => {
   assert.equal(sanitized.sourcePath, "<local-path>");
   assert.equal(sanitized.baseUrl, "https://api.example.com");
   assert.doesNotMatch(String(sanitized.stack), /alice|sk-another-secret/);
+  assert.equal(sanitized.macMessage, "Error at <local-path>");
   assert.doesNotMatch(String(sanitized.stack), /\/v1\/private/);
 });
 
@@ -605,6 +607,10 @@ test("cache directory keys include a stable hash of the complete normalized sour
   assert.notEqual(first, second);
   assert.match(first, /^article-[a-f0-9]{16}$/);
   assert.equal(createStableCacheKey(windowsPath, "Article"), createStableCacheKey(normalizedWindowsPath, "Article"));
+  assert.notEqual(
+    createStableCacheKey("/Users/alice/Documents/Article.md", "Article"),
+    createStableCacheKey("/Users/alice/Documents/article.md", "Article")
+  );
 });
 
 test("committed map fixtures contain digests and portable paths only", () => {
