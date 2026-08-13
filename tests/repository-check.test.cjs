@@ -96,6 +96,9 @@ test("macOS installer and doctor follow the community runtime directory contract
     assert.ok(`${installer}\n${doctor}`.includes(contract), `missing macOS contract: ${contract}`);
   }
   assert.match(installer, /osascript\s+-l\s+JavaScript/);
+  assert.match(installer, /json_is_valid/);
+  assert.match(doctor, /json_is_valid/);
+  assert.doesNotMatch(`${installer}\n${doctor}`, /plutil\s+-lint/);
   assert.match(installer, /settings_hash_before/);
   assert.match(installer, /validate_zip_entries/);
   assert.match(doctor, /plugin\.verified-matrix/);

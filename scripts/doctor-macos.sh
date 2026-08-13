@@ -69,8 +69,36 @@ add_failure() {
   write_result "FAIL" "$1" "$2"
 }
 
-read_json_raw() {
+read_plist_raw() {
   /usr/bin/plutil -extract "$2" raw -o - "$1" 2>/dev/null
+}
+
+json_is_valid() {
+  JSON_PATH="$1" /usr/bin/osascript -l JavaScript >/dev/null 2>&1 <<'JXA'
+ObjC.import('Foundation');
+const env = $.NSProcessInfo.processInfo.environment;
+const filepath = ObjC.unwrap(env.objectForKey('JSON_PATH'));
+const source = ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError($(filepath), $.NSUTF8StringEncoding, null));
+JSON.parse(source);
+JXA
+}
+
+read_json_raw() {
+  JSON_PATH="$1" JSON_KEY="$2" /usr/bin/osascript -l JavaScript 2>/dev/null <<'JXA'
+ObjC.import('Foundation');
+const env = $.NSProcessInfo.processInfo.environment;
+const filepath = ObjC.unwrap(env.objectForKey('JSON_PATH'));
+const keyPath = ObjC.unwrap(env.objectForKey('JSON_KEY'));
+const source = ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError($(filepath), $.NSUTF8StringEncoding, null));
+let value = JSON.parse(source);
+for (const key of keyPath.split('.')) {
+  if (value === null || typeof value !== 'object' || !(key in value)) throw new Error('JSON key not found.');
+  value = value[key];
+}
+if (value === null || typeof value === 'object') throw new Error('JSON value is not scalar.');
+const output = $(String(value)).dataUsingEncoding($.NSUTF8StringEncoding);
+$.NSFileHandle.fileHandleWithStandardOutput.writeData(output);
+JXA
 }
 
 version_ge() {
@@ -115,7 +143,7 @@ if [[ -z "$typora_home" || ! -d "$typora_home" ]]; then
 else
   info_plist="$typora_home/Contents/Info.plist"
   if [[ -f "$info_plist" ]]; then
-    typora_version="$(read_json_raw "$info_plist" "CFBundleShortVersionString" || true)"
+    typora_version="$(read_plist_raw "$info_plist" "CFBundleShortVersionString" || true)"
   fi
   if [[ -n "$typora_version" ]]; then
     add_pass "typora.installation" "Typora $typora_version found at $(display_path "$typora_home")"
@@ -161,7 +189,7 @@ else
 fi
 
 core_version=""
-if [[ -s "$loader_config_path" ]] && /usr/bin/plutil -lint "$loader_config_path" >/dev/null 2>&1; then
+if [[ -s "$loader_config_path" ]] && json_is_valid "$loader_config_path"; then
   add_pass "community-market.loader-config" "loader.json is readable: $(display_path "$loader_config_path")"
   core_version="$(read_json_raw "$loader_config_path" "coreVersion" || true)"
 else
@@ -198,7 +226,7 @@ if [[ "$mode" == "Installed" ]]; then
   done
 
   manifest_path="$plugin_root/manifest.json"
-  if [[ -s "$manifest_path" ]] && /usr/bin/plutil -lint "$manifest_path" >/dev/null 2>&1; then
+  if [[ -s "$manifest_path" ]] && json_is_valid "$manifest_path"; then
     add_pass "plugin.manifest" "Plugin manifest is readable."
     manifest_id="$(read_json_raw "$manifest_path" "id" || true)"
     min_core_version="$(read_json_raw "$manifest_path" "minCoreVersion" || true)"
@@ -228,7 +256,7 @@ if [[ "$mode" == "Installed" ]]; then
   fi
 
   plugin_states_path="$community_root/settings/plugins.json"
-  if [[ -s "$plugin_states_path" ]] && /usr/bin/plutil -lint "$plugin_states_path" >/dev/null 2>&1; then
+  if [[ -s "$plugin_states_path" ]] && json_is_valid "$plugin_states_path"; then
     add_pass "plugin.enabled-config" "Plugin state JSON is readable."
     if /usr/bin/grep -Eq '"eleef\.typora-side-by-side-translator"[[:space:]]*:[[:space:]]*true' "$plugin_states_path"; then
       add_pass "plugin.enabled" "The plugin is enabled in the global community configuration."

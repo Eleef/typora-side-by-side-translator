@@ -126,7 +126,31 @@ sha256_file() {
 }
 
 read_json_raw() {
-  /usr/bin/plutil -extract "$2" raw -o - "$1" 2>/dev/null
+  JSON_PATH="$1" JSON_KEY="$2" /usr/bin/osascript -l JavaScript 2>/dev/null <<'JXA'
+ObjC.import('Foundation');
+const env = $.NSProcessInfo.processInfo.environment;
+const filepath = ObjC.unwrap(env.objectForKey('JSON_PATH'));
+const keyPath = ObjC.unwrap(env.objectForKey('JSON_KEY'));
+const source = ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError($(filepath), $.NSUTF8StringEncoding, null));
+let value = JSON.parse(source);
+for (const key of keyPath.split('.')) {
+  if (value === null || typeof value !== 'object' || !(key in value)) throw new Error('JSON key not found.');
+  value = value[key];
+}
+if (value === null || typeof value === 'object') throw new Error('JSON value is not scalar.');
+const output = $(String(value)).dataUsingEncoding($.NSUTF8StringEncoding);
+$.NSFileHandle.fileHandleWithStandardOutput.writeData(output);
+JXA
+}
+
+json_is_valid() {
+  JSON_PATH="$1" /usr/bin/osascript -l JavaScript >/dev/null 2>&1 <<'JXA'
+ObjC.import('Foundation');
+const env = $.NSProcessInfo.processInfo.environment;
+const filepath = ObjC.unwrap(env.objectForKey('JSON_PATH'));
+const source = ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError($(filepath), $.NSUTF8StringEncoding, null));
+JSON.parse(source);
+JXA
 }
 
 set_plugin_enabled() {
@@ -239,7 +263,7 @@ fi
 validate_package_tree "$source_path"
 
 source_manifest="$source_path/manifest.json"
-if ! /usr/bin/plutil -lint "$source_manifest" >/dev/null 2>&1; then
+if ! json_is_valid "$source_manifest"; then
   printf 'Plugin manifest is invalid JSON.\n' >&2
   exit 1
 fi
@@ -258,7 +282,7 @@ fi
 
 settings_hash_before=""
 if [[ -f "$plugin_settings_path" ]]; then
-  if ! /usr/bin/plutil -lint "$plugin_settings_path" >/dev/null 2>&1; then
+  if ! json_is_valid "$plugin_settings_path"; then
     printf 'Plugin settings are invalid JSON; no plugin files were changed: %s\n' "$plugin_settings_path" >&2
     exit 1
   fi
@@ -268,8 +292,11 @@ if [[ -f "$plugin_settings_path" ]]; then
   stored_api_key="$(read_json_raw "$plugin_settings_path" "settings.storedApiKey" || true)"
   base_url="$(read_json_raw "$plugin_settings_path" "settings.baseUrl" || true)"
   model="$(read_json_raw "$plugin_settings_path" "settings.model" || true)"
-  session_marker_type="$(/usr/bin/plutil -type "settings.sessionCredentialConfigured" "$plugin_settings_path" 2>/dev/null || true)"
-  session_marker="$(read_json_raw "$plugin_settings_path" "settings.sessionCredentialConfigured" || true)"
+  session_marker_present=false
+  session_marker=""
+  if session_marker="$(read_json_raw "$plugin_settings_path" "settings.sessionCredentialConfigured")"; then
+    session_marker_present=true
+  fi
   if [[ -z "$storage_mode" ]]; then
     if [[ "$storage_version" =~ ^[0-9]+$ ]] && ((storage_version >= 1)); then
       storage_mode="plugin-settings"
@@ -282,7 +309,7 @@ if [[ -f "$plugin_settings_path" ]]; then
     has_stored_key=true
   fi
   has_session_risk=false
-  if [[ -n "$session_marker_type" ]]; then
+  if [[ "$session_marker_present" == true ]]; then
     if [[ "$session_marker" == "true" && "$has_stored_key" != true ]]; then
       has_session_risk=true
     fi
@@ -308,7 +335,7 @@ fi
 if [[ ! -f "$plugin_states_path" ]]; then
   printf '{}\n' > "$plugin_states_path"
 fi
-if ! /usr/bin/plutil -lint "$plugin_states_path" >/dev/null 2>&1; then
+if ! json_is_valid "$plugin_states_path"; then
   printf 'Community plugin state is invalid JSON; no plugin files were changed: %s\n' "$plugin_states_path" >&2
   exit 1
 fi
