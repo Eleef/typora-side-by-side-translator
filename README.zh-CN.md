@@ -4,7 +4,9 @@
 
 [English](./README.md)
 
-![Typora 左侧显示英文 Markdown、右侧显示简体中文译文](./docs/assets/typora-side-by-side-translator.png)
+![Typora 左侧显示英文 Markdown 原文、右侧显示缓存的简体中文只读译文](./docs/assets/typora-side-by-side-translator.png)
+
+_Windows 上 Typora 1.14.9 的实拍界面：左侧保持原生编辑，右侧并排显示缓存的只读译文。_
 
 > **Alpha 阶段：**核心流程已在下方 Windows 组合中运行。插件尚未进入社区插件市场，也尚未完成外部用户测试。
 

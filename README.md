@@ -4,7 +4,9 @@ Edit the original Markdown in Typora while reading a generated Chinese, English,
 
 [简体中文](./README.zh-CN.md)
 
-![Typora showing an English Markdown document and its Simplified Chinese translation side by side](./docs/assets/typora-side-by-side-translator.png)
+![Typora with an English Markdown source on the left and a cached Simplified Chinese translation pane on the right](./docs/assets/typora-side-by-side-translator.png)
+
+_Live capture from Typora 1.14.9 on Windows: source editing remains native on the left, while the cached read-only translation stays beside it._
 
 > **Alpha:** the core workflow is working on the verified Windows setup below. The plugin is not yet available in the community marketplace and has not completed external user testing.
 
