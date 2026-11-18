@@ -1149,13 +1149,18 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
     description: string,
     value: string,
     onChange: (value: string) => Promise<void>,
-    inputType = "text"
+    inputType = "text",
+    showDescription = false
   ): void {
     this.addSetting((setting: SettingItem) => {
       setting.addName(title);
-      setting.addDescription(description);
+      if (showDescription) {
+        setting.addDescription(description);
+      }
       setting.addInput(inputType, (input: HTMLInputElement) => {
         input.value = value;
+        input.setAttribute("aria-label", title);
+        input.title = description;
         input.addEventListener("change", () => {
           input.setCustomValidity("");
           void onChange(input.value).catch((error) => {
@@ -1167,22 +1172,26 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
     });
   }
 
+  private addSectionHeading(title: string): void {
+    const heading = document.createElement("h3");
+    heading.className = "typora-bilingual-settings__section";
+    heading.textContent = title;
+    this.containerEl.append(heading);
+  }
+
   public onshow(): void {
+    const localDataWasOpen = this.containerEl.querySelector<HTMLDetailsElement>(".typora-bilingual-settings__data")?.open;
     this.containerEl.innerHTML = "";
+    this.containerEl.classList.add("typora-bilingual-settings");
     const ui = this.pluginInstance.ui;
     const t = ui.t.settings;
-    this.addSettingTitle(t.title);
-
-    this.addSetting((setting: SettingItem) => {
-      setting.addName(t.version);
-      setting.addDescription(ui.format(t.currentVersion, { version: this.pluginInstance.pluginVersion }));
-    });
-
     const settings = this.pluginInstance.getRuntimeSettings();
+    this.addSectionHeading(t.displaySection);
     this.addSetting((setting: SettingItem) => {
       setting.addName(t.uiLanguage);
-      setting.addDescription(t.uiLanguageDescription);
       setting.addSelect((select) => {
+        select.setAttribute("aria-label", t.uiLanguage);
+        select.title = t.uiLanguageDescription;
         for (const language of UI_LANGUAGES) {
           const option = document.createElement("option");
           option.value = language;
@@ -1204,8 +1213,9 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
 
     this.addSetting((setting: SettingItem) => {
       setting.addName(t.targetLanguage);
-      setting.addDescription(t.targetLanguageDescription);
       setting.addSelect((select) => {
+        select.setAttribute("aria-label", t.targetLanguage);
+        select.title = t.targetLanguageDescription;
         for (const language of TARGET_LANGUAGES) {
           const option = document.createElement("option");
           option.value = language.code;
@@ -1225,15 +1235,56 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       });
     });
 
+    this.addSettingInput(`${t.paneWidth} (%)`, t.paneWidthDescription, String(settings.paneWidthPercent), async (value) => {
+      const parsed = Number(value);
+      await this.pluginInstance.updateSetting("paneWidthPercent", Number.isFinite(parsed) ? parsed : 50);
+    }, "number");
+
+    this.addSetting((setting: SettingItem) => {
+      setting.addName(t.toolbarMode);
+      setting.addSelect((select) => {
+        select.setAttribute("aria-label", t.toolbarMode);
+        select.title = t.toolbarModeDescription;
+        const options: Array<["compact" | "collapsed", string]> = [
+          ["compact", t.toolbarCompact],
+          ["collapsed", t.toolbarCollapsed]
+        ];
+        for (const [value, label] of options) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        }
+        select.value = settings.toolbarDisplayMode;
+        select.addEventListener("change", () => {
+          void this.pluginInstance.updateSetting(
+            "toolbarDisplayMode",
+            select.value === "collapsed" ? "collapsed" : "compact"
+          );
+        });
+      });
+    });
+
+    this.addSectionHeading(t.serviceSection);
     this.addSettingInput(t.baseUrl, t.baseUrlDescription, settings.baseUrl, async (value) => {
       await this.pluginInstance.updateSetting("baseUrl", value.trim());
       this.onshow();
+    }, "text", true);
+
+    this.addSettingInput(t.model, t.modelDescription, settings.model, async (value) => {
+      await this.pluginInstance.updateSetting("model", value.trim());
     });
+
+    this.addSettingInput(`${t.timeout} (ms)`, t.timeoutDescription, String(settings.timeoutMs), async (value) => {
+      const parsed = Number(value);
+      await this.pluginInstance.updateSetting("timeoutMs", Number.isFinite(parsed) && parsed > 0 ? parsed : 45000);
+    }, "number");
 
     this.addSetting((setting: SettingItem) => {
       setting.addName(t.credentialStorageMode);
       setting.addDescription(t.credentialStorageDescription);
       setting.addSelect((select) => {
+        select.setAttribute("aria-label", t.credentialStorageMode);
         const options: Array<[CredentialStorageMode, string]> = [
           ["plugin-settings", t.credentialPluginSettings],
           ["session", t.credentialSession]
@@ -1260,9 +1311,23 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
     this.addSettingInput(t.apiKey, this.pluginInstance.credentialStatusDescription, "", async (value) => {
       await this.pluginInstance.updateSetting("apiKey", value.trim());
       this.onshow();
-    }, "password");
+    }, "password", true);
 
-    this.addSetting((setting: SettingItem) => {
+    const localData = document.createElement("details");
+    localData.className = "typora-bilingual-settings__data";
+    localData.open = Boolean(localDataWasOpen);
+    const dataHeading = document.createElement("summary");
+    dataHeading.textContent = t.dataSection;
+    localData.append(dataHeading);
+    this.containerEl.append(localData);
+
+    const addLocalDataSetting = (build: (setting: SettingItem) => void) => {
+      const setting = new SettingItem();
+      build(setting);
+      localData.append(setting.containerEl);
+    };
+
+    addLocalDataSetting((setting) => {
       setting.addName(t.apiKeyManagement);
       setting.addDescription(t.apiKeyManagementDescription);
       setting.addButton((button) => {
@@ -1271,45 +1336,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       });
     });
 
-    this.addSettingInput(t.model, t.modelDescription, settings.model, async (value) => {
-      await this.pluginInstance.updateSetting("model", value.trim());
-    });
-
-    this.addSettingInput(t.timeout, t.timeoutDescription, String(settings.timeoutMs), async (value) => {
-      const parsed = Number(value);
-      await this.pluginInstance.updateSetting("timeoutMs", Number.isFinite(parsed) && parsed > 0 ? parsed : 45000);
-    });
-
-    this.addSettingInput(t.paneWidth, t.paneWidthDescription, String(settings.paneWidthPercent), async (value) => {
-      const parsed = Number(value);
-      await this.pluginInstance.updateSetting("paneWidthPercent", Number.isFinite(parsed) ? parsed : 50);
-    });
-
-    this.addSetting((setting: SettingItem) => {
-      setting.addName(t.toolbarMode);
-      setting.addDescription(t.toolbarModeDescription);
-      setting.addSelect((select) => {
-        const options: Array<["compact" | "collapsed", string]> = [
-          ["compact", t.toolbarCompact],
-          ["collapsed", t.toolbarCollapsed]
-        ];
-        for (const [value, label] of options) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = label;
-          select.appendChild(option);
-        }
-        select.value = settings.toolbarDisplayMode;
-        select.addEventListener("change", () => {
-          void this.pluginInstance.updateSetting(
-            "toolbarDisplayMode",
-            select.value === "collapsed" ? "collapsed" : "compact"
-          );
-        });
-      });
-    });
-
-    this.addSetting((setting: SettingItem) => {
+    addLocalDataSetting((setting) => {
       setting.addName(t.translationCache);
       setting.addDescription((description) => {
         description.textContent = t.calculatingCache;
@@ -1344,7 +1371,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
 
     const diagnosticsPath = this.pluginInstance.diagnosticsLogPath;
     if (diagnosticsPath) {
-      this.addSetting((setting: SettingItem) => {
+      addLocalDataSetting((setting) => {
         setting.addName(t.diagnosticsLog);
         setting.addDescription(diagnosticsPath);
         setting.addButton((button) => {
@@ -1354,7 +1381,7 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
       });
     }
 
-    this.addSetting((setting: SettingItem) => {
+    addLocalDataSetting((setting) => {
       setting.addName(t.eraseLocalData);
       setting.addDescription(t.eraseLocalDataDescription);
       setting.addButton((button) => {
@@ -1371,6 +1398,11 @@ class TyporaSideBySideTranslatorSettingTab extends SettingTab {
         });
       });
     });
+
+    const version = document.createElement("div");
+    version.className = "typora-bilingual-settings__version";
+    version.textContent = ui.format(t.currentVersion, { version: this.pluginInstance.pluginVersion });
+    this.containerEl.append(version);
   }
 
   private async runSettingAction(button: HTMLButtonElement, action: () => Promise<void>): Promise<void> {

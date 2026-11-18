@@ -244,7 +244,8 @@ test("translation pane restores the original editor DOM and supports keyboard re
   }
 });
 
-test("translation pane exposes one state-driven primary action without duplicate retranslation", () => {
+test("translation pane exposes one state-driven primary action without duplicate retranslation", async () => {
+  const editedBlocks = await new BlockExtractionService().extract("First.\n\nInserted.\n\nLast.");
   const dom = new JSDOM(
     '<!doctype html><html><body><main><div id="write"><h1>Source</h1><p>Paragraph</p></div></main></body></html>',
     { pretendToBeVisual: true }
@@ -296,7 +297,7 @@ test("translation pane exposes one state-driven primary action without duplicate
     cachedDetail: "{cacheName}"
   };
   const localizer = {
-    t: { pane: paneText, errors: { cacheStaleExport: "Refresh before exporting" } },
+    t: { pane: { ...paneText, statusStaleCount: "To update: {count}" }, errors: { cacheStaleExport: "Refresh before exporting" } },
     format: (template: string, values: Record<string, string | number> = {}) =>
       template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? "")),
     targetLanguageLabel: (language: string) => language,
@@ -338,13 +339,26 @@ test("translation pane exposes one state-driven primary action without duplicate
     });
 
     const primary = () => dom.window.document.querySelector<HTMLButtonElement>('[data-action="primary"]');
-    controller.render(baseState);
+    const statusBadge = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__status-badge");
+    const compactToggle = dom.window.document.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
+    controller.render({ ...baseState, staleCount: 3 });
     assert.equal(primary()?.textContent, "Translate to ZH");
+    assert.equal(statusBadge?.textContent, "Not translated");
+    const bubbleCount = compactToggle?.querySelector<HTMLElement>(".typora-bilingual-pane__bubble-count");
+    assert.equal(bubbleCount?.textContent, "");
     primary()?.click();
     assert.equal(invoked.full, 1);
 
-    controller.render({ ...baseState, targetMarkdown: "Translated", staleCount: 3 });
+    controller.render({ ...baseState, targetMarkdown: "Translated", staleCount: 5, blocks: editedBlocks,
+      translatedBlocks: new Map([[editedBlocks[0].id, "First translation"], [editedBlocks[2].id, "Last translation"]]) });
+    assert.equal(primary()?.textContent, "Refresh");
+    assert.equal(bubbleCount?.textContent, "1");
+
+    controller.render({ ...baseState, targetMarkdown: "Translated", staleCount: 3, blocks: editedBlocks });
     assert.equal(primary()?.textContent, "Update 3");
+    assert.equal(statusBadge?.textContent, "To update: 3");
+    assert.equal(bubbleCount?.textContent, "3");
+    assert.match(compactToggle?.getAttribute("aria-label") ?? "", /To update: 3/);
     const exportButton = dom.window.document.querySelector<HTMLButtonElement>('[data-action="export-target"]');
     assert.equal(exportButton?.disabled, true);
     exportButton?.click();
@@ -357,21 +371,27 @@ test("translation pane exposes one state-driven primary action without duplicate
     assert.equal(invoked.stale, 1);
 
     controller.render({ ...baseState, targetMarkdown: "Translated" });
-    assert.equal(primary()?.textContent, "Retranslate all");
-    assert.equal(primary()?.classList.contains("is-hidden"), false);
-    assert.ok(dom.window.document.querySelector<HTMLButtonElement>('[data-action="translate-all"]')?.classList.contains("is-hidden"));
-    const toolbar = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__toolbar");
-    const compactToggle = dom.window.document.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
+    assert.ok(primary()?.classList.contains("is-hidden"));
+    const retranslate = dom.window.document.querySelector<HTMLButtonElement>('[data-action="translate-all"]');
+    assert.equal(retranslate?.textContent, "Retranslate all");
+    assert.equal(retranslate?.classList.contains("is-hidden"), false);
+    const toolbar = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__flyout");
     assert.equal(toolbar?.classList.contains("is-hidden"), false);
     assert.ok(compactToggle?.classList.contains("is-hidden"));
-    controller.render({ ...baseState, targetMarkdown: "Translated", isTranslating: true });
+    assert.equal(bubbleCount?.textContent, "");
+    controller.render({ ...baseState, targetMarkdown: "Translated", isTranslating: true, staleCount: 3 });
     assert.equal(primary()?.textContent, "Cancel");
+    assert.equal(statusBadge?.dataset.kind, "translating");
+    assert.equal(bubbleCount?.textContent, "");
+    assert.match(compactToggle?.getAttribute("aria-label") ?? "", /Translating/);
     assert.equal(toolbar?.classList.contains("is-hidden"), false);
     primary()?.click();
     assert.equal(invoked.cancel, 1);
 
     controller.render({ ...baseState, targetMarkdown: "Translated", retryMode: "stale", errorMessage: "Failed" });
     assert.equal(primary()?.textContent, "Retry");
+    assert.equal(bubbleCount?.textContent, "");
+    assert.match(compactToggle?.getAttribute("aria-label") ?? "", /Retry · .*Error/);
     primary()?.click();
     assert.equal(invoked.stale, 2);
 
@@ -387,6 +407,10 @@ test("translation pane exposes one state-driven primary action without duplicate
     more?.click();
     dom.window.document.querySelector<HTMLButtonElement>('[data-preset="60"]')?.click();
     assert.deepEqual(widths, [60]);
+    assert.equal(invoked.full, 1);
+    more?.click();
+    retranslate?.click();
+    assert.equal(invoked.full, 2);
   } finally {
     controller.destroy();
     Object.assign(globalThis, previousGlobals);
@@ -394,7 +418,7 @@ test("translation pane exposes one state-driven primary action without duplicate
   }
 });
 
-test("collapsed translation bubble opens a vertical menu on hover and exposes horizontal cascades", async () => {
+test("hovering the collapsed bubble reveals its primary action without starting translation", async () => {
   const dom = new JSDOM('<!doctype html><html><body><main><div id="write"><p>Source</p></div></main></body></html>', {
     pretendToBeVisual: true
   });
@@ -418,42 +442,77 @@ test("collapsed translation bubble opens a vertical menu on hover and exposes ho
     mountFailed: "Mount failed", initializeFailed: "Init failed", unsupportedFile: "Unsupported", noSavedMarkdown: "No file",
     markdownOnly: "Markdown only", noCachedTranslation: "None", cacheNotGenerated: "None", statusTranslating: "Running",
     statusError: "Error", statusNotTranslated: "New", statusStale: "Stale", statusCached: "Cached",
-    translationRunning: "Running", staleDetail: "Stale", cachedDetail: "Cached"
+    statusStaleCount: "Stale: {count}", translationRunning: "Running", staleDetail: "Stale", cachedDetail: "Cached"
   };
   const localizer = {
-    t: { pane: paneText }, format: (value: string) => value,
+    t: { pane: paneText, errors: { cacheStaleExport: "Cache stale" } },
+    format: (value: string, replacements: Record<string, unknown>) =>
+      value.replace(/\{(\w+)\}/g, (_, key: string) => String(replacements[key])),
     targetLanguageLabel: (language: string) => language, targetLanguageShortLabel: () => "ZH"
   } as unknown as PluginLocalizer;
   const controller = new TranslationPaneController(localizer);
+  const invoked = { full: 0, stale: 0, cancel: 0 };
   try {
     controller.ensureMounted({
-      onTranslateAll: () => undefined, onRefreshStale: () => undefined, onCancelTranslation: () => undefined,
+      onTranslateAll: () => invoked.full++, onRefreshStale: () => invoked.stale++, onCancelTranslation: () => invoked.cancel++,
       onExportTarget: () => undefined, onTargetLanguageChange: () => undefined, onJumpToSource: () => undefined,
       onResize: () => undefined
     });
-    controller.render({
-      association: null, targetMarkdown: null, translatedBlocks: new Map(), blocks: [], isVisible: true, staleCount: 0,
-      targetLang: "zh-CN", paneWidthPercent: 50, toolbarDisplayMode: "collapsed", isTranslating: false
-    });
-    const overlay = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__overlay");
+    const blocks = await new BlockExtractionService().extract("New paragraph");
+    const baseState = {
+      association: {
+        sourcePath: "/source/article.md", cacheTargetPath: "/cache/article.zh.md",
+        cacheMapPath: "/cache/article.zh.map.json", exportTargetPath: "/source/article.zh.md",
+        targetLang: "zh-CN" as const, isSupportedSource: true
+      },
+      targetMarkdown: "Cached", translatedBlocks: new Map<string, string>(), blocks, isVisible: true, staleCount: 1,
+      targetLang: "zh-CN" as const, paneWidthPercent: 50, toolbarDisplayMode: "collapsed" as const, isTranslating: false
+    };
+    controller.render(baseState);
     const toggle = dom.window.document.querySelector<HTMLButtonElement>('[data-action="toggle-toolbar"]');
-    const toolbar = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__toolbar");
-    toggle?.dispatchEvent(new dom.window.MouseEvent("mouseenter", { bubbles: true }));
+    const bubbleCount = toggle?.querySelector<HTMLElement>(".typora-bilingual-pane__bubble-count");
+    const bubbleAction = toggle?.querySelector<HTMLElement>(".typora-bilingual-pane__bubble-action");
+    const toolbar = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__flyout");
+    const language = toolbar?.querySelector<HTMLSelectElement>('[data-action="target-language"]');
+    const more = toolbar?.querySelector<HTMLButtonElement>('[data-action="toggle-more"]');
+    const menu = dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__menu");
+    const hover = () => toggle?.dispatchEvent(Object.assign(new dom.window.Event("pointerenter"), { pointerType: "mouse" }));
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+    assert.ok(toolbar?.classList.contains("is-hidden"));
+    assert.equal(bubbleCount?.textContent, "1");
+    assert.equal(bubbleCount?.hidden, false);
+    assert.equal(bubbleAction?.hidden, true);
+    hover();
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
     assert.equal(toolbar?.classList.contains("is-hidden"), false);
-    assert.equal(dom.window.document.querySelector<HTMLElement>(".typora-bilingual-pane__menu")?.classList.contains("is-hidden"), false);
-    assert.equal(dom.window.document.querySelectorAll(".typora-bilingual-pane__language-cascade [data-target-language]").length, 5);
-    assert.equal(dom.window.document.querySelectorAll(".typora-bilingual-pane__layout-cascade [data-preset]").length, 3);
-    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(bubbleCount?.hidden, true);
+    assert.equal(bubbleAction?.hidden, false);
+    assert.equal(bubbleAction?.textContent, "Update 1");
+    assert.deepEqual(invoked, { full: 0, stale: 0, cancel: 0 });
+    toggle?.click();
+    assert.deepEqual(invoked, { full: 0, stale: 1, cancel: 0 });
+    assert.ok(menu?.classList.contains("is-hidden"));
+    assert.equal(language?.options.length, 5);
+    more?.click();
+    assert.equal(menu?.querySelectorAll("[data-preset]").length, 3);
+    more?.focus();
+    more?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     assert.ok(toolbar?.classList.contains("is-hidden"));
-    toggle?.dispatchEvent(new dom.window.MouseEvent("mouseenter", { bubbles: true }));
-    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true }));
+    assert.ok(menu?.classList.contains("is-hidden"));
+    assert.equal(dom.window.document.activeElement, toggle);
+    hover();
+    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }));
     assert.ok(toolbar?.classList.contains("is-hidden"));
-    toggle?.dispatchEvent(new dom.window.MouseEvent("mouseenter", { bubbles: true }));
-    toolbar?.dispatchEvent(new dom.window.MouseEvent("mouseleave", { bubbles: true }));
-    assert.equal(toolbar?.classList.contains("is-hidden"), false);
-    await new Promise((resolve) => dom.window.setTimeout(resolve, 230));
+    assert.equal(bubbleCount?.hidden, false);
+    controller.render({ ...baseState, isTranslating: true });
+    hover();
+    assert.equal(bubbleAction?.textContent, "Cancel");
+    toggle?.click();
+    controller.render({ ...baseState, staleCount: 0 });
+    assert.equal(bubbleCount?.hidden, true);
+    toggle?.click();
     assert.ok(toolbar?.classList.contains("is-hidden"));
-    assert.equal(toggle?.classList.contains("is-hidden"), false);
+    assert.deepEqual(invoked, { full: 0, stale: 1, cancel: 1 });
   } finally {
     controller.destroy();
     Object.assign(globalThis, previousGlobals);

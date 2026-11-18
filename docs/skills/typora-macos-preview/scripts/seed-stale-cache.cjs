@@ -8,14 +8,14 @@ const { ExplicitTranslationAuthorizer } = require(path.join(compiled, "translati
 const { TranslationOrchestrator } = require(path.join(compiled, "translation/TranslationOrchestrator"));
 
 async function main() {
-  const [sourceArgument, rootArgument] = process.argv.slice(2);
-  if (!sourceArgument || !rootArgument) {
-    throw new Error("Usage: node seed-stale-cache.cjs <new Markdown path> <translation cache root>");
+  const [sourceArgument, rootArgument, mode] = process.argv.slice(2);
+  if (!sourceArgument || !rootArgument || (mode && mode !== "--body-only")) {
+    throw new Error("Usage: node seed-stale-cache.cjs <new Markdown path> <translation cache root> [--body-only]");
   }
 
   const sourcePath = path.join(await fs.realpath(path.dirname(sourceArgument)), path.basename(sourceArgument));
   const pairs = [
-    ["---\ndescription: Alignment fixture\n---", "---\ndescription: 对齐测试样例\n---"],
+    ...(mode === "--body-only" ? [] : [["---\ndescription: Alignment fixture\n---", "---\ndescription: 对齐测试样例\n---"]]),
     ["# Alignment test", "# 对齐测试"],
     [
       "First retained paragraph. The source paragraph is longer than the translation, so the right column needs space before the next row.",
