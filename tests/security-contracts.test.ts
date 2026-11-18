@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { parse as parseYaml } from "yaml";
 import { CacheMaintenanceService } from "../src/cache/CacheMaintenanceService";
 import { createStableCacheKey } from "../src/files/CacheKey";
 import { UserFacingError } from "../src/i18n/UserFacingError";
@@ -456,9 +457,11 @@ test("translation provider restores protected Markdown and rejects changed place
   const authorizer = new ExplicitTranslationAuthorizer();
   const sourceMarkdown = "Read [docs](https://example.com/a?q=1), `npm test`, and $x + 1$.";
   let corruptPlaceholders = false;
+  let fetchCalls = 0;
   const provider = new OpenAICompatibleProvider(
     authorizer,
     createRuntime(async (_input, init) => {
+      fetchCalls += 1;
       const body = JSON.parse(String(init?.body)) as {
         messages: Array<{ role: string; content: string }>;
       };
@@ -492,6 +495,180 @@ test("translation provider restores protected Markdown and rejects changed place
     ),
     (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
   );
+  assert.equal(fetchCalls, 2);
+});
+
+test("translation provider batches only descriptive YAML values with Markdown and safely rebuilds the header", async () => {
+  const authorizer = new ExplicitTranslationAuthorizer();
+  const sourceMarkdown = [
+    "---",
+    'title: "Sample title" # Keep this comment',
+    "description: |-",
+    "  First line.",
+    "  Second line.",
+    "summary: &shared Shared value",
+    "label: *shared",
+    "date: 2026-01-01",
+    "tags: [note, example]",
+    "url: https://example.com",
+    "---"
+  ].join("\n");
+  const translations = { title: "标题：示例 # 保留符号", description: "说明：测试\n---\ncategory: 仍然是描述的一部分" };
+  let calls = 0;
+  let invalid = false;
+  const provider = new OpenAICompatibleProvider(authorizer, createRuntime(async (_input, init) => {
+    calls += 1;
+    const request = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    assert.deepEqual(request.blocks, [
+      { id: "metadata", format: "yaml-values", sourceMarkdown: JSON.stringify({ title: "Sample title", description: "First line.\nSecond line." }) },
+      { id: "body", sourceMarkdown: "Content." }
+    ]);
+    return createApiResponse(JSON.stringify({ blocks: [
+      { id: "metadata", translatedMarkdown: JSON.stringify(invalid ? { title: translations.title, tags: "extra" } : translations) },
+      { id: "body", translatedMarkdown: "正文。" }
+    ] }));
+  }));
+  const translate = () => provider.translateBlocks(TRANSLATION_SETTINGS, [
+    { id: "metadata", sourceMarkdown, format: "yaml-values" },
+    { id: "body", sourceMarkdown: "Content." }
+  ], authorizer.authorize("translate-current-file"));
+  const result = await translate();
+  const markdown = result.blocks[0].translatedMarkdown;
+  assert.match(markdown, /^---\n[\s\S]+\n---$/);
+  assert.match(markdown, /# Keep this comment/);
+  assert.deepEqual(parseYaml(markdown.split("\n").slice(1, -1).join("\n")), {
+    ...translations, summary: "Shared value", label: "Shared value", date: "2026-01-01",
+    tags: ["note", "example"], url: "https://example.com"
+  });
+  assert.equal(result.blocks[1].translatedMarkdown, "正文。");
+  assert.equal(calls, 1);
+
+  invalid = true;
+  await assert.rejects(translate(), (error) => error instanceof UserFacingError && error.code === "responseBlockInvalid");
+  assert.equal(calls, 2);
+});
+
+test("translation repairs bold spacing locally without requesting another translation", async () => {
+  const authorizer = new ExplicitTranslationAuthorizer();
+  const sourceMarkdown = "- **Result:** Check the output.\n- **Next:** Continue.";
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleProvider(
+    authorizer,
+    createRuntime(async () => {
+      fetchCalls += 1;
+      return createApiResponse(JSON.stringify({
+        blocks: [{ id: "list", translatedMarkdown: "- **结果：**检查输出。\n- **后续：**继续。" }]
+      }));
+    })
+  );
+
+  const result = await provider.translateBlocks(
+    TRANSLATION_SETTINGS,
+    [{ id: "list", sourceMarkdown }],
+    authorizer.authorize("translate-current-file")
+  );
+  assert.equal(fetchCalls, 1);
+  assert.equal(result.blocks[0].translatedMarkdown, "- **结果：** 检查输出。\n- **后续：** 继续。");
+});
+
+test("translation re-requests only structurally changed blocks as text and rebuilds the original markup", async () => {
+  const authorizer = new ExplicitTranslationAuthorizer();
+  const sourceMarkdown = "- Read [the docs](https://example.com/docs) and `npm test`.\n- **Result:** Check the output.";
+  const localizedText = new Map([
+    ["Read", "阅读"],
+    ["the docs", "文档"],
+    ["and", "并运行"],
+    [".", "。"],
+    ["Result:", "结果："],
+    ["Check the output.", "检查输出。"]
+  ]);
+  const fallbackRequests: string[][] = [];
+  let fetchCalls = 0;
+  let emptyFallback = false;
+  const provider = new OpenAICompatibleProvider(
+    authorizer,
+    createRuntime(async (_input, init) => {
+      fetchCalls += 1;
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+      const request = JSON.parse(body.messages[1].content) as {
+        blocks: Array<{ id: string; sourceMarkdown: string }>;
+      };
+      if (request.blocks[0].id.includes(":text:")) {
+        fallbackRequests.push(request.blocks.map((block) => block.sourceMarkdown));
+        return createApiResponse(JSON.stringify({
+          blocks: request.blocks.map((block) => ({
+            id: block.id,
+            translatedMarkdown: emptyFallback ? "" : (localizedText.get(block.sourceMarkdown) ?? block.sourceMarkdown)
+          })).reverse()
+        }));
+      }
+      return createApiResponse(JSON.stringify({
+        blocks: request.blocks.map((block) => ({
+          id: block.id,
+          translatedMarkdown: block.id === "list"
+            ? block.sourceMarkdown.replace("**Result:** Check the output.", "结果：检查输出。")
+            : "另一个正常的段落。"
+        }))
+      }));
+    })
+  );
+  const blocks = [{ id: "list", sourceMarkdown }, { id: "paragraph", sourceMarkdown: "Another normal paragraph." }];
+  const authorization = authorizer.authorize("translate-current-file");
+  const result = await provider.translateBlocks(TRANSLATION_SETTINGS, blocks, authorization);
+
+  assert.equal(fetchCalls, 2);
+  assert.deepEqual(fallbackRequests, [["Read", "the docs", "and", ".", "Result:", "Check the output."]]);
+  assert.deepEqual(result.blocks.map((block) => block.id), ["list", "paragraph"]);
+  assert.equal(result.blocks[1].translatedMarkdown, "另一个正常的段落。");
+  assert.deepEqual(result.blocks[0].translatedMarkdown.split("\n"), [
+    "* 阅读 [文档](https://example.com/docs) 并运行 `npm test`。",
+    "* **结果：** 检查输出。"
+  ]);
+
+  await assert.rejects(
+    provider.translateBlocks(TRANSLATION_SETTINGS, blocks, authorization),
+    (error) => error instanceof UserFacingError && error.code === "markdownFallbackLimit"
+  );
+  assert.equal(fetchCalls, 3);
+
+  emptyFallback = true;
+  await assert.rejects(
+    provider.translateBlocks(TRANSLATION_SETTINGS, blocks, authorizer.authorize("translate-current-file")),
+    (error) => error instanceof UserFacingError && error.code === "markdownProtectionFailed"
+  );
+  assert.equal(fetchCalls, 5);
+});
+
+test("translation skips automatic fallback when the affected blocks, fragments, or text are too large", async () => {
+  const authorizer = new ExplicitTranslationAuthorizer();
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleProvider(
+    authorizer,
+    createRuntime(async (_input, init) => {
+      fetchCalls += 1;
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const request = JSON.parse(body.messages[1].content) as { blocks: Array<{ id: string }> };
+      return createApiResponse(JSON.stringify({
+        blocks: request.blocks.map(({ id }) => ({ id, translatedMarkdown: "格式已经丢失。" }))
+      }));
+    })
+  );
+  const cases = [
+    ["# First", "## Second", "### Third"],
+    [Array.from({ length: 25 }, (_, index) => `- Item ${index}`).join("\n")],
+    [`# ${"word ".repeat(241).trim()}`]
+  ];
+  for (const sources of cases) {
+    await assert.rejects(
+      provider.translateBlocks(
+        TRANSLATION_SETTINGS,
+        sources.map((sourceMarkdown, index) => ({ id: `block-${index}`, sourceMarkdown })),
+        authorizer.authorize("translate-current-file")
+      ),
+      (error) => error instanceof UserFacingError && error.code === "markdownFallbackLimit"
+    );
+  }
+  assert.equal(fetchCalls, cases.length);
 });
 
 test("translation provider propagates user cancellation without retrying", async () => {

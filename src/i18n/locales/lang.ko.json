@@ -148,6 +148,7 @@
     "requestFailed": "번역 요청에 실패했습니다.",
     "responseBlockInvalid": "번역 API가 올바르지 않은 블록 데이터를 반환했습니다: {detail}",
     "markdownProtectionFailed": "번역 API가 보호된 Markdown 내용이나 구조를 변경하여 결과를 거부했습니다.",
+    "markdownFallbackLimit": "자동 재번역 한도 내에서 서식을 복구하지 못했습니다. 새 번역은 저장되지 않았습니다.",
     "cacheLanguageMismatch": "캐시의 대상 언어가 현재 대상과 다릅니다. 대상 언어를 다시 선택한 후 번역하세요.",
     "cacheInvalidRefresh": "번역 캐시 또는 매핑 파일이 없거나 손상되었거나 읽을 수 없습니다. 기존 번역을 보호하기 위해 새로 고침을 중단했습니다. 캐시를 내보내거나 백업한 후 '전체 번역'을 실행하세요.",
     "cacheInvalidExport": "번역 캐시 또는 매핑 파일이 없거나 손상되었거나 읽을 수 없어 내보내기를 중단했습니다.",

@@ -148,6 +148,7 @@
     "requestFailed": "翻譯請求失敗。",
     "responseBlockInvalid": "翻譯 API 傳回無效的區塊資料：{detail}",
     "markdownProtectionFailed": "翻譯 API 變更了受保護的 Markdown 內容或結構，已拒絕寫入。",
+    "markdownFallbackLimit": "譯文格式無法在自動補譯限額內修復，本次未寫入譯文。",
     "cacheLanguageMismatch": "快取目標語言與目前目標不一致，請重新選擇目標語言後再翻譯。",
     "cacheInvalidRefresh": "翻譯快取或對應檔案缺失、損壞或無法讀取。為保護現有譯文，已停止重新整理；請先匯出或備份快取，再執行「全文翻譯」。",
     "cacheInvalidExport": "翻譯快取或對應檔案缺失、損壞或無法讀取，已停止匯出。",

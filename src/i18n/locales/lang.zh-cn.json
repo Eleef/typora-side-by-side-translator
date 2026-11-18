@@ -148,6 +148,7 @@
     "requestFailed": "翻译请求失败。",
     "responseBlockInvalid": "翻译接口返回了无效块数据：{detail}",
     "markdownProtectionFailed": "翻译接口改变了受保护的 Markdown 内容或结构，已拒绝写入。",
+    "markdownFallbackLimit": "译文格式无法在自动补译限额内修复，本次未写入译文。",
     "cacheLanguageMismatch": "缓存目标语言与当前目标不一致，请重新选择目标语言后再翻译。",
     "cacheInvalidRefresh": "翻译缓存或映射文件缺失、损坏或不可读。为保护现有译文，已停止刷新脏区；请先导出或备份缓存，再执行“全文翻译”。",
     "cacheInvalidExport": "翻译缓存或映射文件缺失、损坏或不可读，已停止导出。",

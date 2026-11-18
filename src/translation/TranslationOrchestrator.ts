@@ -186,6 +186,53 @@ export class TranslationOrchestrator {
     return changedCount + map.blocks.filter((block) => !currentIds.has(block.id)).length;
   }
 
+  private async loadMatchingState(association: FileAssociation, blocks: TranslationBlock[]): Promise<CacheState> {
+    const existing = await this.loadExistingState(association);
+    if (!existing.map || existing.targetMarkdown === null) {
+      return existing;
+    }
+    const frontmatter = blocks[0]?.type === "frontmatter" ? blocks[0] : undefined;
+    const oldHasFrontmatter = existing.map.blocks[0]?.type === "frontmatter";
+    if (Boolean(frontmatter) === oldHasFrontmatter) {
+      return existing;
+    }
+
+    const body = frontmatter ? blocks.slice(1) : blocks;
+    const oldBody = existing.map.blocks.slice(Math.max(0, existing.map.blocks.length - body.length));
+    if (existing.map.blockIdAlgorithm !== TRANSLATION_BLOCK_ID_ALGORITHM ||
+      oldBody.length !== body.length ||
+      body.some((block, index) => block.type !== oldBody[index].type || block.sourceHash !== oldBody[index].sourceHash)) {
+      return { map: null, targetMarkdown: null, status: "invalid" };
+    }
+
+    const oldTranslations = this.markdownCodec.parseCache(existing.targetMarkdown);
+    const translations = new Map<string, string>();
+    const mapBlocks: TranslationMapBlock[] = [];
+    if (frontmatter) {
+      translations.set(frontmatter.id, frontmatter.sourceMarkdown);
+      mapBlocks.push({
+        id: frontmatter.id,
+        type: frontmatter.type,
+        order: frontmatter.order,
+        headingPath: frontmatter.headingPath,
+        sourceHash: frontmatter.translatable ? "" : frontmatter.sourceHash,
+        translatedHash: await hashTranslation(frontmatter.sourceMarkdown),
+        stale: false,
+        manuallyEdited: false
+      });
+    }
+    for (const [index, block] of body.entries()) {
+      const previous = oldBody[index];
+      translations.set(block.id, oldTranslations.get(previous.id) ?? block.sourceMarkdown);
+      mapBlocks.push({ ...previous, id: block.id, order: block.order, headingPath: block.headingPath });
+    }
+    return {
+      ...existing,
+      map: { ...existing.map, blocks: mapBlocks },
+      targetMarkdown: this.markdownCodec.buildCache(blocks, translations, existing.map.cacheGeneration)
+    };
+  }
+
   public async computeStaleState(
     association: FileAssociation,
     sourceMarkdown: string
@@ -196,7 +243,7 @@ export class TranslationOrchestrator {
     staleCount: number;
   }> {
     const blocks = await this.extractor.extract(sourceMarkdown);
-    const existing = await this.loadExistingState(association);
+    const existing = await this.loadMatchingState(association, blocks);
     if (!existing.map) {
       return {
         blocks,
@@ -227,7 +274,7 @@ export class TranslationOrchestrator {
       throw new UserFacingError("cacheLanguageMismatch");
     }
     const blocks = await this.extractor.extract(sourceMarkdown);
-    const existing = await this.loadExistingState(association);
+    const existing = await this.loadMatchingState(association, blocks);
     if (existing.recoveryRequired) {
       throw new UserFacingError("cacheRecoveryRequired");
     }
@@ -290,7 +337,7 @@ export class TranslationOrchestrator {
 
   public async buildExportMarkdown(association: FileAssociation, sourceMarkdown: string): Promise<string> {
     const blocks = await this.extractor.extract(sourceMarkdown);
-    const existing = await this.loadExistingState(association);
+    const existing = await this.loadMatchingState(association, blocks);
     if (!existing.map) {
       throw new UserFacingError(existing.status === "empty" ? "exportRequiresTranslation" : "cacheInvalidExport");
     }
@@ -301,8 +348,37 @@ export class TranslationOrchestrator {
     return this.markdownCodec.buildExport(blocks, translatedBlocks);
   }
 
-  public parseCachedTranslations(markdown: string | null): Map<string, string> {
-    return this.markdownCodec.parseCache(markdown);
+  public getPreviewTranslations(
+    markdown: string | null,
+    blocks: TranslationBlock[],
+    map: TranslationMap | null
+  ): Map<string, string> {
+    const preview = new Map<string, string>();
+    if (!map || !markdown) {
+      return preview;
+    }
+
+    const cached = this.markdownCodec.parseCache(markdown);
+    const previousById = new Map(map.blocks.map((block) => [block.id, block]));
+    const previousByHash = new Map<string, TranslationMapBlock | null>();
+    const currentHashCounts = new Map<string, number>();
+    for (const block of map.blocks) {
+      previousByHash.set(block.sourceHash, previousByHash.has(block.sourceHash) ? null : block);
+    }
+    for (const block of blocks) {
+      currentHashCounts.set(block.sourceHash, (currentHashCounts.get(block.sourceHash) ?? 0) + 1);
+    }
+    for (const block of blocks) {
+      const samePosition = previousById.get(block.id);
+      const previous = samePosition?.sourceHash === block.sourceHash
+        ? samePosition
+        : currentHashCounts.get(block.sourceHash) === 1 ? previousByHash.get(block.sourceHash) : null;
+      const translation = previous ? cached.get(previous.id) : undefined;
+      if (translation !== undefined) {
+        preview.set(block.id, translation);
+      }
+    }
+    return preview;
   }
 
   private async migrateLegacyMap(
@@ -441,7 +517,7 @@ export class TranslationOrchestrator {
         sourceMarkdown: translations.get(id) ?? "",
         headingPath: mapped?.headingPath ?? [],
         order: mapped?.order ?? order,
-        translatable: type !== "code" && type !== "math" && type !== "html" && type !== "passthrough",
+        translatable: type !== "code" && type !== "math" && type !== "html" && type !== "passthrough" && type !== "frontmatter",
         sourceHash: mapped?.sourceHash ?? ""
       };
     });

@@ -1,4 +1,4 @@
-import { Root } from "mdast";
+import type { Root, Text } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
@@ -30,6 +30,12 @@ interface ProtectedValue {
 export interface ProtectedMarkdown {
   markdown: string;
   restoreAndValidate(translatedMarkdown: string): string;
+  planTextFallback(): MarkdownTextPlan;
+}
+
+interface MarkdownTextPlan {
+  segments: string[];
+  render(translations: string[]): string;
 }
 
 const TOKEN_PATTERN = /TYPORASIDEBYSIDEPROTECTED\d+TOKEN/g;
@@ -81,42 +87,101 @@ export class MarkdownStructureProtector {
     const expectedStructure = this.structureSignature(expectedTree as unknown as MutableNode);
     const expectedTokenContexts = this.tokenContexts(expectedTree as unknown as MutableNode);
 
+    const restoreAndValidate = (translatedMarkdown: string): string => {
+      let normalizedTranslation = normalizeLineEndings(translatedMarkdown).trim();
+      if (normalizedSource && !normalizedTranslation) {
+        throw new UserFacingError("markdownProtectionFailed");
+      }
+
+      const receivedTokens = normalizedTranslation.match(TOKEN_PATTERN) ?? [];
+      for (const { token } of protectedValues) {
+        if (receivedTokens.filter((candidate) => candidate === token).length !== 1) {
+          throw new UserFacingError("markdownProtectionFailed");
+        }
+      }
+      if (receivedTokens.length !== protectedValues.length) {
+        throw new UserFacingError("markdownProtectionFailed");
+      }
+
+      const translatedTree = this.processor.parse(normalizedTranslation) as Root;
+      if (this.tokenContexts(translatedTree as unknown as MutableNode) !== expectedTokenContexts) {
+        throw new UserFacingError("markdownProtectionFailed");
+      }
+      if (this.structureSignature(translatedTree as unknown as MutableNode) !== expectedStructure) {
+        const repaired = this.repairStrongSpacing(normalizedTranslation, translatedTree);
+        const repairedTree = repaired === normalizedTranslation ? null : this.processor.parse(repaired);
+        if (!repairedTree ||
+          this.structureSignature(repairedTree as unknown as MutableNode) !== expectedStructure ||
+          this.tokenContexts(repairedTree as unknown as MutableNode) !== expectedTokenContexts) {
+          throw new UserFacingError("markdownProtectionFailed", { reason: "structure" });
+        }
+        normalizedTranslation = repaired;
+      }
+
+      let restored = normalizedTranslation;
+      for (const { placeholder, value } of protectedValues) {
+        if (!restored.includes(placeholder)) {
+          throw new UserFacingError("markdownProtectionFailed");
+        }
+        restored = restored.replace(placeholder, value);
+      }
+      return restored;
+    };
+
     return {
       markdown: protectedMarkdown,
-      restoreAndValidate: (translatedMarkdown) => {
-        const normalizedTranslation = normalizeLineEndings(translatedMarkdown).trim();
-        if (normalizedSource && !normalizedTranslation) {
-          throw new UserFacingError("markdownProtectionFailed");
-        }
-
-        const receivedTokens = normalizedTranslation.match(TOKEN_PATTERN) ?? [];
-        for (const { token } of protectedValues) {
-          if (receivedTokens.filter((candidate) => candidate === token).length !== 1) {
-            throw new UserFacingError("markdownProtectionFailed");
+      restoreAndValidate,
+      planTextFallback: () => {
+        const tree = this.processor.parse(protectedMarkdown) as Root;
+        const originalValues = new Map(protectedValues.map(({ token, value }) => [token, value]));
+        const textNodes: Text[] = [];
+        visit(tree, "text", (node, _index, parent) => {
+          if (!node.value.trim()) {
+            return;
           }
-        }
-        if (receivedTokens.length !== protectedValues.length) {
-          throw new UserFacingError("markdownProtectionFailed");
-        }
-
-        const translatedTree = this.processor.parse(normalizedTranslation) as Root;
-        if (this.tokenContexts(translatedTree as unknown as MutableNode) !== expectedTokenContexts) {
-          throw new UserFacingError("markdownProtectionFailed");
-        }
-        if (this.structureSignature(translatedTree as unknown as MutableNode) !== expectedStructure) {
-          throw new UserFacingError("markdownProtectionFailed");
-        }
-
-        let restored = normalizedTranslation;
-        for (const { placeholder, value } of protectedValues) {
-          if (!restored.includes(placeholder)) {
-            throw new UserFacingError("markdownProtectionFailed");
+          if (parent?.type === "link" && parent.children.length === 1) {
+            const url = originalValues.get(parent.url) ?? parent.url;
+            if (url === node.value || url === `mailto:${node.value}` || url === `http://${node.value}`) {
+              return;
+            }
           }
-          restored = restored.replace(placeholder, value);
-        }
-        return restored;
+          textNodes.push(node);
+        });
+        return {
+          segments: textNodes.map((node) => node.value.trim()),
+          render: (translations) => {
+            if (translations.length !== textNodes.length || translations.some((value) => !value.trim())) {
+              throw new UserFacingError("markdownProtectionFailed");
+            }
+            for (const [index, node] of textNodes.entries()) {
+              const leading = node.value.slice(0, node.value.length - node.value.trimStart().length);
+              const trailing = node.value.slice(node.value.trimEnd().length);
+              node.value = `${leading}${translations[index].trim()}${trailing}`;
+            }
+            return restoreAndValidate(this.processor.stringify(tree));
+          }
+        };
       }
     };
+  }
+
+  private repairStrongSpacing(markdown: string, tree: Root): string {
+    const parts: string[] = [];
+    let offset = 0;
+    visit(tree, "text", ({ value, position }) => {
+      const start = position?.start.offset;
+      const end = position?.end.offset;
+      if (start === undefined || end === undefined || markdown.slice(start, end) !== value) {
+        return;
+      }
+      const repaired = value.replace(/(^|[ \t])\*\*[^*\n]+?(?<=[\p{P}\p{S}])\*\*(?=[\p{L}\p{N}])/gu, "$& ");
+      if (repaired !== value) {
+        parts.push(markdown.slice(offset, start), repaired);
+        offset = end;
+      }
+    });
+    parts.push(markdown.slice(offset));
+    return parts.join("");
   }
 
   private structureSignature(node: MutableNode): string {

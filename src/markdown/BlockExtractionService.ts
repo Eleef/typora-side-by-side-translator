@@ -1,4 +1,5 @@
 import { Root } from "mdast";
+import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
@@ -8,6 +9,7 @@ import { visit } from "unist-util-visit";
 import { TranslationBlock, TranslationBlockType } from "../types";
 import { normalizeLineEndings, sha256, slugifyHeading } from "../utils";
 import { createTranslationBlockId } from "./BlockIdentity";
+import { planYamlFrontmatterTranslation } from "./YamlFrontmatter";
 
 interface MdNode {
   type: string;
@@ -21,7 +23,7 @@ interface MdNode {
 }
 
 export class BlockExtractionService {
-  private readonly processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkStringify);
+  private readonly processor = unified().use(remarkParse).use(remarkFrontmatter).use(remarkGfm).use(remarkMath).use(remarkStringify);
 
   public async extract(markdown: string): Promise<TranslationBlock[]> {
     const normalizedMarkdown = normalizeLineEndings(markdown);
@@ -53,7 +55,7 @@ export class BlockExtractionService {
         sourceMarkdown,
         headingPath,
         order,
-        translatable: this.isTranslatable(type),
+        translatable: this.isTranslatable(type) || (type === "frontmatter" && !!planYamlFrontmatterTranslation(sourceMarkdown)),
         sourceHash: await sha256(`${type}\n${sourceMarkdown}`),
         anchorSlug: type === "heading" ? slugifyHeading(this.extractHeadingText(node)) : undefined
       });
@@ -65,6 +67,8 @@ export class BlockExtractionService {
 
   private mapType(node: MdNode): TranslationBlockType {
     switch (node.type) {
+      case "yaml":
+        return "frontmatter";
       case "heading":
       case "paragraph":
       case "list":
@@ -86,7 +90,7 @@ export class BlockExtractionService {
   }
 
   private serializeNode(node: MdNode, type: TranslationBlockType, sourceMarkdown: string): string {
-    if (type === "passthrough") {
+    if (type === "passthrough" || type === "frontmatter") {
       const start = node.position?.start?.offset;
       const end = node.position?.end?.offset;
       if (typeof start === "number" && typeof end === "number") {

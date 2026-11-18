@@ -3,6 +3,9 @@ import test from "node:test";
 import type { WindowLike } from "dompurify";
 import { JSDOM } from "jsdom";
 import type { PluginLocalizer } from "../src/i18n/PluginLocalizer";
+import en from "../src/i18n/locales/lang.en.json";
+import { BlockExtractionService } from "../src/markdown/BlockExtractionService";
+import { BlockAlignment, blockTextKey } from "../src/sync/BlockAlignment";
 import { createTranslationHtmlSanitizer } from "../src/ui/TranslationHtmlSanitizer";
 import { TranslationPaneController } from "../src/ui/TranslationPaneController";
 
@@ -31,6 +34,112 @@ test("translation HTML sanitizer preserves safe Markdown links and table structu
   assert.match(clean, /<table>/);
   assert.match(clean, /<th>Key<\/th>/);
   assert.match(clean, /href="https:\/\/example\.com"/);
+});
+
+test("translation pane shows translated YAML as a metadata block and renders the body normally", async () => {
+  const metadata = 'description: "<img src=example.png>"\ntags:\n  - notes';
+  const frontmatter = `---\n${metadata}\n---`;
+  const blocks = await new BlockExtractionService().extract(`${frontmatter}\n\n# Original`);
+  const dom = new JSDOM('<main><div id="write"><pre class="md-meta-block"></pre><h1>Original</h1></div></main>', {
+    pretendToBeVisual: true
+  });
+  const previousGlobals = { window: globalThis.window, document: globalThis.document, Window: globalThis.Window };
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, Window: dom.window.Window });
+  const controller = new TranslationPaneController({
+    t: en, format: (value: string) => value,
+    targetLanguageLabel: (value: string) => value, targetLanguageShortLabel: (value: string) => value
+  } as unknown as PluginLocalizer);
+
+  try {
+    const noAction = () => undefined;
+    controller.ensureMounted({
+      onTranslateAll: noAction, onRefreshStale: noAction, onCancelTranslation: noAction, onExportTarget: noAction,
+      onTargetLanguageChange: noAction, onJumpToSource: noAction, onResize: noAction
+    });
+    controller.render({
+      association: {
+        sourcePath: "/source/article.md", cacheTargetPath: "/cache/article.zh.md",
+        cacheMapPath: "/cache/article.zh.map.json", exportTargetPath: "/source/article.zh.md",
+        targetLang: "zh-CN", isSupportedSource: true
+      },
+      targetMarkdown: "Cached document",
+      translatedBlocks: new Map([[blocks[0].id, frontmatter.replace("example.png", "translated.png")], [blocks[1].id, "# Translated"]]),
+      blocks, isVisible: true, staleCount: 0, targetLang: "zh-CN",
+      paneWidthPercent: 50, toolbarDisplayMode: "compact", isTranslating: false
+    });
+    const pane = dom.window.document.querySelector(".typora-bilingual-pane__body");
+    assert.equal(pane?.querySelector('[data-type="frontmatter"] > pre.md-meta-block')?.textContent, metadata.replace("example.png", "translated.png"));
+    assert.equal(pane?.querySelector("h1")?.textContent, "Translated");
+    assert.equal(pane?.querySelector("hr, img"), null);
+  } finally {
+    controller.destroy();
+    Object.assign(globalThis, previousGlobals);
+    dom.window.close();
+  }
+});
+
+test("alignment pairs top-level blocks across an unmatched insertion and restores native margins", () => {
+  const dom = new JSDOM([
+    '<div id="write"><pre class="md-meta-block">description: note</pre>',
+    '<ul><li><p>Nested</p></li></ul><p>Unsaved insertion</p>',
+    '<p style="margin-top: 6px">Body<span class="md-meta">**</span></p>',
+    '<figure class="md-table-fig"><table><tr><td>Table</td></tr></table></figure>',
+    '<h2>Next</h2></div>',
+    '<div id="translated"><section><pre>YAML</pre></section><section><ul><li>List</li></ul></section>',
+    '<section><p>Paragraph</p></section><section><table><tr><td>Translated table</td></tr></table></section>',
+    '<section><h2>Heading</h2></section></div>'
+  ].join(""));
+  const source = dom.window.document.querySelector<HTMLElement>("#write")!;
+  const target = dom.window.document.querySelector<HTMLElement>("#translated")!;
+  const sourceBlocks = Array.from(source.children) as HTMLElement[];
+  const targetBlocks = Array.from(target.children) as HTMLElement[];
+  const visibleRect = (top: number) => ({ top } as DOMRect);
+  const mockLayout = (root: HTMLElement, children: HTMLElement[], tops: number[]) => {
+    root.getClientRects = () => [visibleRect(0)] as unknown as DOMRectList;
+    children.forEach((element, index) => {
+      const baseMargins = children.map((child) => Number.parseFloat(child.style.marginTop) || 0);
+      const rect = () => visibleRect(tops[index] + children.slice(0, index + 1).reduce(
+        (offset, child, childIndex) => offset + (Number.parseFloat(child.style.marginTop) || 0) - baseMargins[childIndex], 0
+      ));
+      element.getClientRects = () => [rect()] as unknown as DOMRectList;
+      element.getBoundingClientRect = rect;
+      if (element.firstElementChild) {
+        element.firstElementChild.getClientRects = element.getClientRects;
+        element.firstElementChild.getBoundingClientRect = rect;
+      }
+    });
+  };
+  mockLayout(source, sourceBlocks, [30, 60, 90, 130, 180, 250]);
+  mockLayout(target, targetBlocks, [54, 120, 150, 170, 270]);
+  assert.equal(blockTextKey(sourceBlocks[3]), "Body");
+  const targets = [
+    { id: "metadata", type: "frontmatter", key: "description:note", element: targetBlocks[0] },
+    { id: "list", type: "list", key: "Nested", element: targetBlocks[1] },
+    { id: "body", type: "paragraph", key: "Body", element: targetBlocks[2] },
+    { id: "table", type: "table", key: "Table", element: targetBlocks[3] },
+    { id: "heading", type: "heading", key: "Next", element: targetBlocks[4] }
+  ] as const;
+  const alignment = new BlockAlignment();
+
+  try {
+    for (const attempt of [1, 2]) {
+      const pairs = alignment.align(source, targets);
+      assert.deepEqual(Array.from(pairs.values()), [sourceBlocks[0], sourceBlocks[1], sourceBlocks[3], sourceBlocks[4], sourceBlocks[5]]);
+      targets.forEach(({ id, element }) => {
+        assert.equal(pairs.get(id)?.getBoundingClientRect().top, element.getBoundingClientRect().top, `pass ${attempt}, ${id}`);
+      });
+    }
+    assert.ok(sourceBlocks.some((element) => element.style.getPropertyPriority("margin-top") === "important"));
+    assert.ok(targetBlocks.some((element) => element.style.getPropertyPriority("margin-top") === "important"));
+    alignment.clear();
+    assert.equal(sourceBlocks[3].style.marginTop, "6px");
+    assert.ok(targetBlocks.every((element) => element.style.marginTop === ""));
+    assert.deepEqual(Array.from(source.children), sourceBlocks);
+    assert.equal(source.className, "");
+  } finally {
+    alignment.clear();
+    dom.window.close();
+  }
 });
 
 test("translation pane restores the original editor DOM and supports keyboard resizing", () => {

@@ -1,4 +1,5 @@
 export type TranslationBlockType =
+  | "frontmatter"
   | "heading"
   | "paragraph"
   | "list"
@@ -91,6 +92,7 @@ export interface TranslationResult {
 export interface TranslationRequestPayload {
   id: string;
   sourceMarkdown: string;
+  format?: "yaml-values";
 }
 
 export interface TranslationResponsePayload {

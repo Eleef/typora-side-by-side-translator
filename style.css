@@ -33,6 +33,12 @@
   box-sizing: border-box;
 }
 
+.typora-bilingual-source > .typora-bilingual-aligned-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+
 .typora-bilingual-resizer {
   position: relative;
   z-index: 4;
@@ -448,8 +454,11 @@
 
 .typora-bilingual-pane__body {
   flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   overflow: visible;
-  padding: 0 18px 24px;
+  padding: 54px 18px 24px;
 }
 
 .typora-bilingual-pane__empty {
@@ -461,6 +470,7 @@
 }
 
 .typora-bilingual-pane__block {
+  display: flow-root;
   margin-bottom: 14px;
   cursor: pointer;
   box-sizing: border-box;
@@ -474,6 +484,19 @@
   outline: 2px solid rgba(0, 122, 255, 0.18);
   outline-offset: 4px;
   border-radius: 6px;
+}
+
+.typora-bilingual-pane__block[data-type="frontmatter"] .md-meta-block {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-color, #222) 6%, var(--bg-color, #fff));
+  color: color-mix(in srgb, var(--text-color, #222) 75%, var(--bg-color, #fff));
+  font-family: var(--monospace, monospace);
+  font-size: 0.85em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .typora-bilingual-pane__block[data-type="heading"] h1,

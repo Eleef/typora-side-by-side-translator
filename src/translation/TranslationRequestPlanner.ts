@@ -1,4 +1,5 @@
 import { TRANSLATION_BLOCK_ID_ALGORITHM } from "../markdown/BlockIdentity";
+import { planYamlFrontmatterTranslation } from "../markdown/YamlFrontmatter";
 import { TranslationBlock, TranslationMap, TranslationRequestPayload } from "../types";
 import { storedTranslationMatches } from "./TranslationIntegrity";
 
@@ -50,7 +51,8 @@ export class TranslationRequestPlanner {
 
       requests.push({
         id: block.id,
-        sourceMarkdown: block.sourceMarkdown
+        sourceMarkdown: block.sourceMarkdown,
+        ...(block.type === "frontmatter" ? { format: "yaml-values" } : {})
       });
     }
     return requests;
@@ -62,7 +64,8 @@ export class TranslationRequestPlanner {
     let currentChars = 0;
 
     for (const request of requests) {
-      const chars = request.sourceMarkdown.length;
+      const yaml = request.format === "yaml-values" ? planYamlFrontmatterTranslation(request.sourceMarkdown) : null;
+      const chars = yaml ? JSON.stringify(yaml.values).length : request.sourceMarkdown.length;
       if (current.length > 0 && (current.length >= 12 || currentChars + chars > 6000)) {
         batches.push(current);
         current = [];

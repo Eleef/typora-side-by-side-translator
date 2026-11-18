@@ -148,6 +148,7 @@
     "requestFailed": "The translation request failed.",
     "responseBlockInvalid": "The translation API returned invalid block data: {detail}",
     "markdownProtectionFailed": "The translation API changed protected Markdown content or structure, so the result was rejected.",
+    "markdownFallbackLimit": "The translation could not be repaired within the automatic retry limit. No new translation was saved.",
     "cacheLanguageMismatch": "The cache target language does not match the current target. Select the target language again before translating.",
     "cacheInvalidRefresh": "The translation cache or map is missing, damaged or unreadable. Stale refresh stopped to protect existing translations; export or back up the cache, then run Translate All.",
     "cacheInvalidExport": "The translation cache or map is missing, damaged or unreadable, so export was stopped.",

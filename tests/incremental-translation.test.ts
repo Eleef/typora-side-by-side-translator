@@ -172,6 +172,75 @@ test("stale planning skips unchanged and manually edited translations", async ()
   );
 });
 
+test("legacy YAML cache reuses verified body translations and refreshes only the front matter", async () => {
+  const frontmatter = "---\ndescription: Sample metadata\ntags:\n  - plugin\n---";
+  const body = "# Product\n\nThis is the body.\n\n---\n\nAnother paragraph.";
+  const source = `${frontmatter}\n\n${body}`;
+  const authorizer = new ExplicitTranslationAuthorizer();
+  const requests: TranslationRequestPayload[][] = [];
+  const storage = createMemoryStorage([]);
+  const orchestrator = new TranslationOrchestrator(
+    {
+      async translateBlocks(_settings, blocks) {
+        requests.push(blocks);
+        return {
+          blocks: blocks.map(({ id, sourceMarkdown }) => ({
+            id,
+            translatedMarkdown: sourceMarkdown.replace("This is the body.", "Translated body.")
+          }))
+        };
+      }
+    },
+    storage.adapter,
+    { dirname: () => "/cache" }
+  );
+
+  const legacyBlocks = (await orchestrator.translate(
+    ASSOCIATION, `\n${source}`, TRANSLATION_SETTINGS, "full", authorizer.authorize("translate-current-file")
+  )).blocks;
+  assert.equal(legacyBlocks[0].type, "passthrough");
+  assert.ok(requests[0].some(({ sourceMarkdown }) => sourceMarkdown.includes("description:")));
+  const cacheBefore = storage.files.get(ASSOCIATION.cacheTargetPath);
+  const state = await orchestrator.computeStaleState(ASSOCIATION, source);
+  assert.equal(state.blocks[0].type, "frontmatter");
+  assert.equal(state.blocks[0].translatable, true);
+  assert.equal(state.blocks[0].sourceMarkdown, frontmatter);
+  assert.equal(state.staleCount, 1);
+  assert.ok(state.targetMarkdown?.includes("Translated body."));
+  assert.equal(storage.files.get(ASSOCIATION.cacheTargetPath), cacheBefore);
+  assert.equal((await orchestrator.computeStaleState(ASSOCIATION, source.replace("This is the body.", "A different body."))).targetMarkdown, null);
+  assert.equal(requests.length, 1);
+
+  await orchestrator.translate(
+    ASSOCIATION, source, TRANSLATION_SETTINGS, "stale", authorizer.authorize("refresh-stale-blocks")
+  );
+  assert.deepEqual(requests[1], [{ id: state.blocks[0].id, sourceMarkdown: frontmatter, format: "yaml-values" }]);
+  assert.equal(await orchestrator.buildExportMarkdown(ASSOCIATION, source), source.replace("This is the body.", "Translated body."));
+});
+
+test("preview reuses verified translations after a paragraph insertion without calling the provider", async () => {
+  const before = await new BlockExtractionService().extract(BEFORE_MARKDOWN);
+  const translations = new Map(before.map(({ id, order }) => [id, order === 3 ? "" : `Translation ${order}`]));
+  const cache = new TranslationMarkdownCodec().buildCache(before, translations);
+  const storage = createMemoryStorage([
+    [ASSOCIATION.cacheTargetPath, cache],
+    [ASSOCIATION.cacheMapPath, JSON.stringify(await createMap(before, translations))]
+  ]);
+  const orchestrator = new TranslationOrchestrator(
+    createProvider(() => assert.fail("Opening a preview must not translate")),
+    storage.adapter,
+    { dirname: () => "/cache" }
+  );
+  const source = "# Title\n\nInserted paragraph.\n\nFirst old.\n\nSecond edited.\n\nThird unchanged.";
+  const state = await orchestrator.computeStaleState(ASSOCIATION, source);
+  const preview = orchestrator.getPreviewTranslations(state.targetMarkdown, state.blocks, state.map);
+
+  assert.ok(state.staleCount > 0);
+  assert.deepEqual(state.blocks.map(({ id }) => preview.get(id)), ["Translation 0", undefined, "Translation 1", undefined, ""]);
+  assert.deepEqual(storage.writes, []);
+  assert.equal(storage.files.get(ASSOCIATION.cacheTargetPath), cache);
+});
+
 test("stale planning refuses legacy block identities without blocking full translation", async () => {
   const blocks = await new BlockExtractionService().extract(BEFORE_MARKDOWN);
   const generated = new Map(blocks.map((block) => [block.id, `system translation ${block.order}`]));

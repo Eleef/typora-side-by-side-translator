@@ -1,8 +1,9 @@
 import MarkdownIt from "markdown-it";
 import { PluginLocalizer } from "../i18n/PluginLocalizer";
-import { AnchorMappingService } from "../sync/AnchorMappingService";
+import { getYamlFrontmatterBody } from "../markdown/YamlFrontmatter";
+import { AlignmentTarget, BlockAlignment, blockTextKey, hasComparableText } from "../sync/BlockAlignment";
 import { ScrollSyncService } from "../sync/ScrollSyncService";
-import { FileAssociationReason, PaneRenderState, TargetLanguage, TranslationBlock, TranslationBlockType } from "../types";
+import { FileAssociationReason, PaneRenderState, TargetLanguage } from "../types";
 import { TARGET_LANGUAGES } from "../translation/TargetLanguage";
 import { createTranslationHtmlSanitizer } from "./TranslationHtmlSanitizer";
 
@@ -23,9 +24,10 @@ type PrimaryAction = "translate-all" | "refresh-stale" | "cancel-translation";
 export class TranslationPaneController {
   private readonly markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
   private readonly sanitizeHtml = createTranslationHtmlSanitizer(window);
-  private readonly anchorMapping = new AnchorMappingService();
+  private readonly blockAlignment = new BlockAlignment();
   private readonly scrollSync = new ScrollSyncService();
-  private readonly sourceBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, blockquote, table";
+  private alignmentTargets: AlignmentTarget[] = [];
+  private alignedSources = new Map<string, HTMLElement>();
   private host: HTMLDivElement | null = null;
   private pane: HTMLDivElement | null = null;
   private paneBody: HTMLDivElement | null = null;
@@ -38,6 +40,7 @@ export class TranslationPaneController {
   private resizeHandle: HTMLDivElement | null = null;
   private actions: PaneActions | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private sourceObserver: MutationObserver | null = null;
   private windowResizeHandler: (() => void) | null = null;
   private layoutSyncFrame: number | null = null;
   private toolbarExpanded = false;
@@ -293,16 +296,14 @@ export class TranslationPaneController {
   }
 
   public destroy(): void {
-    this.scrollSync.unbind();
+    this.clearAlignment();
+    this.sourceObserver?.disconnect();
+    this.sourceObserver = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     if (this.windowResizeHandler) {
       window.removeEventListener("resize", this.windowResizeHandler);
       this.windowResizeHandler = null;
-    }
-    if (this.layoutSyncFrame !== null) {
-      window.cancelAnimationFrame(this.layoutSyncFrame);
-      this.layoutSyncFrame = null;
     }
     this.resizeDragCleanup?.();
     this.resizeDragCleanup = null;
@@ -358,6 +359,7 @@ export class TranslationPaneController {
     this.host.classList.toggle("is-pane-hidden", !state.isVisible);
     this.pane.classList.toggle("is-hidden", !state.isVisible);
     if (!state.isVisible) {
+      this.clearAlignment();
       this.closeTransientControls();
       return;
     }
@@ -395,20 +397,20 @@ export class TranslationPaneController {
     this.syncToolbarMode();
     this.renderPresetState(state.paneWidthPercent);
 
+    this.clearAlignment();
     this.paneBody.innerHTML = "";
 
     if (!state.association?.isSupportedSource) {
       this.paneBody.appendChild(this.createEmptyState(unsupportedReason ?? this.localizer.t.pane.unsupportedFile));
-      this.scheduleLayoutSync();
       return;
     }
 
     if (!state.targetMarkdown) {
       this.paneBody.appendChild(this.createEmptyState(this.localizer.t.pane.noCachedTranslation));
-      this.scheduleLayoutSync();
       return;
     }
 
+    const sourcePreview = document.createElement("template");
     for (const block of state.blocks) {
       const markdown = state.translatedBlocks.get(block.id) ?? block.sourceMarkdown;
       const blockEl = document.createElement("section");
@@ -417,54 +419,61 @@ export class TranslationPaneController {
       blockEl.dataset.order = String(block.order);
       blockEl.dataset.type = block.type;
       blockEl.dataset.translatable = String(block.translatable);
-      blockEl.dataset.headingPath = this.anchorMapping.serializeHeadingPath(block.headingPath);
       if (this.activeBlockId === block.id) {
         blockEl.classList.add("is-active");
       }
-      blockEl.innerHTML = this.sanitizeHtml(this.markdown.render(markdown));
+      if (block.type === "frontmatter") {
+        const metadata = document.createElement("pre");
+        metadata.className = "md-meta-block";
+        metadata.textContent = getYamlFrontmatterBody(markdown) ?? getYamlFrontmatterBody(block.sourceMarkdown);
+        blockEl.appendChild(metadata);
+      } else {
+        blockEl.innerHTML = this.sanitizeHtml(this.markdown.render(markdown));
+      }
       this.paneBody.appendChild(blockEl);
+      let key: string | null = null;
+      if (block.type === "frontmatter") {
+        sourcePreview.content.textContent = getYamlFrontmatterBody(block.sourceMarkdown) ?? "";
+        key = blockTextKey(sourcePreview.content);
+      } else if (hasComparableText(block.type)) {
+        sourcePreview.innerHTML = this.sanitizeHtml(this.markdown.render(block.sourceMarkdown));
+        key = blockTextKey(sourcePreview.content);
+      }
+      this.alignmentTargets.push({ id: block.id, type: block.type, element: blockEl, key });
     }
 
-    this.bindScrollSync(state.blocks);
+    this.scrollSync.bind({
+      scrollRoot: this.scrollRoot,
+      sourceBlocks: () => this.alignedSources,
+      onActiveBlock: (blockId) => this.setActiveBlock(blockId)
+    });
     this.scheduleLayoutSync();
   }
 
   public jumpToSource(blockId: string): void {
-    const source = this.sourceContainer;
-    const paneBody = this.paneBody;
-    if (!source || !paneBody) {
-      return;
-    }
-
-    const targetHeadingPath = paneBody.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)?.dataset.headingPath;
-    if (!targetHeadingPath) {
-      return;
-    }
-
-    const candidates = Array.from(source.querySelectorAll<HTMLElement>(this.sourceBlockSelector));
-    for (const candidate of candidates) {
-      const headingPath = this.anchorMapping.serializeHeadingPath(this.anchorMapping.findHeadingPath(candidate, source));
-      if (headingPath === targetHeadingPath) {
-        candidate.scrollIntoView({ block: "center", behavior: "smooth" });
-        return;
-      }
+    this.syncAlignment();
+    const source = this.alignedSources.get(blockId);
+    if (source && source.parentElement === this.sourceContainer) {
+      source.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   }
 
-  private bindScrollSync(blocks: TranslationBlock[]): void {
-    if (!this.sourceContainer || !this.paneBody) {
-      return;
+  private clearAlignment(): void {
+    if (this.layoutSyncFrame !== null) {
+      window.cancelAnimationFrame(this.layoutSyncFrame);
+      this.layoutSyncFrame = null;
     }
-    this.scrollSync.bind({
-      scrollRoot: this.scrollRoot,
-      sourceRoot: this.sourceContainer,
-      blocks,
-      anchorMapping: this.anchorMapping,
-      onActiveBlock: (blockId) => this.setActiveBlock(blockId)
-    });
+    this.scrollSync.unbind();
+    this.blockAlignment.clear();
+    this.alignmentTargets = [];
+    this.alignedSources.clear();
+    this.setActiveBlock(null);
   }
 
   private setActiveBlock(blockId: string | null): void {
+    if (this.activeBlockId === blockId) {
+      return;
+    }
     this.activeBlockId = blockId;
     if (!this.paneBody) {
       return;
@@ -571,6 +580,10 @@ export class TranslationPaneController {
       return;
     }
 
+    if (typeof MutationObserver !== "undefined") {
+      this.sourceObserver = new MutationObserver(() => this.scheduleLayoutSync());
+      this.sourceObserver.observe(this.sourceContainer, { childList: true, characterData: true, subtree: true });
+    }
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver?.disconnect();
       this.resizeObserver = new ResizeObserver(() => this.scheduleLayoutSync());
@@ -891,68 +904,21 @@ export class TranslationPaneController {
   }
 
   private scheduleLayoutSync(): void {
-    if (this.layoutSyncFrame !== null) {
-      window.cancelAnimationFrame(this.layoutSyncFrame);
+    if (!this.alignmentTargets.length || this.layoutSyncFrame !== null) {
+      return;
     }
 
     this.layoutSyncFrame = window.requestAnimationFrame(() => {
       this.layoutSyncFrame = null;
-      this.syncBlockHeights();
+      this.syncAlignment();
     });
   }
 
-  private syncBlockHeights(): void {
-    if (!this.sourceContainer || !this.paneBody) {
-      return;
+  private syncAlignment(): void {
+    if (this.sourceContainer && this.alignmentTargets.length) {
+      this.alignedSources = this.blockAlignment.align(this.sourceContainer, this.alignmentTargets);
+      this.scrollSync.refresh();
     }
-
-    const sourceBlockQueues = this.collectSourceBlockQueues();
-    const translatedBlocks = Array.from(this.paneBody.querySelectorAll<HTMLElement>(".typora-bilingual-pane__block"));
-
-    for (const block of translatedBlocks) {
-      block.style.minHeight = "";
-    }
-
-    for (const translatedBlock of translatedBlocks) {
-      const blockType = (translatedBlock.dataset.type as TranslationBlockType | undefined) ?? "paragraph";
-      const sourceBlock = sourceBlockQueues[blockType]?.shift();
-      if (!sourceBlock) {
-        continue;
-      }
-      const sourceHeight = Math.ceil(sourceBlock.getBoundingClientRect().height);
-      if (sourceHeight > 0) {
-        translatedBlock.style.minHeight = `${sourceHeight}px`;
-      }
-    }
-  }
-
-  private collectSourceBlockQueues(): Record<TranslationBlockType, HTMLElement[]> {
-    const source = this.sourceContainer;
-    if (!source) {
-      return {
-        heading: [],
-        paragraph: [],
-        list: [],
-        blockquote: [],
-        table: [],
-        html: [],
-        code: [],
-        math: [],
-        passthrough: []
-      };
-    }
-
-    return {
-      heading: Array.from(source.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")),
-      paragraph: Array.from(source.querySelectorAll<HTMLElement>("p")),
-      list: Array.from(source.querySelectorAll<HTMLElement>("ul, ol")),
-      blockquote: Array.from(source.querySelectorAll<HTMLElement>("blockquote")),
-      table: Array.from(source.querySelectorAll<HTMLElement>("table")),
-      html: Array.from(source.querySelectorAll<HTMLElement>(".md-htmlblock, .md-rawblock, .htmlblock")),
-      code: Array.from(source.querySelectorAll<HTMLElement>("pre, .md-fences")),
-      math: Array.from(source.querySelectorAll<HTMLElement>(".mathjax-block, .md-math-block, .md-math, .md-equation, .MathJax_Display")),
-      passthrough: Array.from(source.querySelectorAll<HTMLElement>("hr"))
-    };
   }
 
   private findSourceContainer(): HTMLElement | null {
@@ -968,7 +934,7 @@ export class TranslationPaneController {
     while (current) {
       const style = window.getComputedStyle(current);
       const overflowY = style.overflowY;
-      if ((overflowY === "auto" || overflowY === "scroll") && current.scrollHeight > current.clientHeight) {
+      if (overflowY === "auto" || overflowY === "scroll") {
         return current;
       }
       current = current.parentElement;

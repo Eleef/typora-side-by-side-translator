@@ -25,7 +25,7 @@ Current development version: **`0.1.0-alpha.3`**. The installed version is also 
 - **Use the plugin in your language.** The interface can follow Typora automatically or use English, Simplified Chinese, Traditional Chinese, Japanese, or Korean independently of the translation target.
 - **Refresh only what changed.** Markdown blocks are tracked independently, while manually edited cached translations are protected from silent replacement.
 - **Preserve Markdown structure.** Headings, paragraphs, lists, quotes, tables, links, code, math, and HTML follow type-specific translation rules.
-- **Read as one document.** Both columns share Typora's main scroll context and support adjustable `40/60`, `50/50`, and `60/40` layouts.
+- **Read as one document.** Both columns scroll together, with an adjustable split. Matched top-level blocks start at the same height, and clicking a matched translation jumps to its source block. Lists and tables align as a whole.
 
 ## Quick Start
 
@@ -117,7 +117,7 @@ The default macOS plugin directory is:
 5. You can also run **Toggle Pane** in the community command panel. With the tested Mac core 2.10.86, press `F1` (or `Fn+F1`); the tested Windows setup uses `F2`.
 6. Run **Translate Current File** to create the selected language's cached translation.
 7. After editing the source, run **Refresh Stale Blocks** when you want changed blocks translated again. Translation reads the current editor content, including unsaved edits to a previously saved document.
-8. While a request is running, use **Cancel Translation** to stop it without replacing the existing cache.
+8. Switch to another document while translation runs. The result is saved to the original document's cache, and you'll see the progress, translation, or error when you return. Use **Cancel Translation** in that document to stop its task without replacing its existing cache.
 9. Run **Export Target File** to write a clean language-suffixed Markdown file beside the source file. If the translation no longer matches the current source, refresh or retranslate before exporting.
 
 ## How It Works
@@ -136,7 +136,9 @@ Markdown block extraction --> OpenAI-compatible /chat/completions endpoint
                     read-only right pane              clean *.zh.md export
 ```
 
-The source language is detected by the configured model. The target is selected from Simplified Chinese (`.zh.md`), Traditional Chinese (`.zh-TW.md`), English (`.en.md`), Japanese (`.ja.md`), or Korean (`.ko.md`). Switching targets reads that language's independent cache and never sends a request automatically. OpenAI-compatible remote APIs and loopback-hosted local model services are supported. Code, math, and HTML blocks are retained without translation; link text may be translated while URLs remain unchanged.
+The source language is detected by the configured model. The target is selected from Simplified Chinese (`.zh.md`), Traditional Chinese (`.zh-TW.md`), English (`.en.md`), Japanese (`.ja.md`), or Korean (`.ko.md`). Switching targets reads that language's independent cache and never sends a request automatically. OpenAI-compatible remote APIs and loopback-hosted local model services are supported. Code, math, and HTML blocks are kept without translation; link text may be translated while URLs remain unchanged.
+
+YAML front matter remains a metadata block in the pane and at the start of exports. The plugin translates top-level text values of `title`, `description`, `summary`, `subtitle`, `abstract`, and `excerpt`, leaving other metadata unchanged. If the body of an older cached translation still matches the source, **Refresh Stale Blocks** translates only the missing front matter.
 
 ## Data Safety
 
@@ -179,6 +181,10 @@ bash ./scripts/doctor-macos.sh --redact-paths
 ```
 
 Typora updates may replace the modified HTML, hiding all community plugins. If the doctor reports a `community-market.injection` failure, quit Typora and rerun the one-command installer to reattach the existing loader. Do not restore HTML from an older Typora version over the new version.
+
+The plugin settings show the local **Diagnostics log** path. A Markdown protection error can occur even when the API returns HTTP 200: the plugin checks the returned Markdown before saving it. Missing spaces after closing bold markers can be repaired locally without another API call. For other formatting changes with intact protection markers, the plugin can send one extra request per translation command, across all batches, for at most two affected blocks, 24 text fragments, and 1,200 characters of source text. It rebuilds the original formatting locally. If it exceeds the limit or still cannot validate the result, it leaves the existing translation unchanged.
+
+To correlate a failure with a gateway log, match the plugin's UTC timestamp against the request's completion time; the plugin log does not record request IDs or translation bodies.
 
 When reporting a problem, rerun the doctor with `-RedactPaths`, then use the repository's Bug or Compatibility issue form and include that redacted summary, Typora version, community core version, and reproduction steps. Do not include API keys or unredacted logs.
 

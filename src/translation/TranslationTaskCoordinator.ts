@@ -17,7 +17,7 @@ export function isTranslationCancelled(error: unknown): boolean {
 }
 
 export class TranslationTaskCoordinator {
-  private readonly activeTasks = new Map<string, AbortController>();
+  private readonly activeTasks = new Map<string, { controller: AbortController; settled: Promise<void> }>();
 
   public isRunning(sourcePath: string): boolean {
     return this.activeTasks.has(sourcePath);
@@ -29,28 +29,40 @@ export class TranslationTaskCoordinator {
     }
 
     const controller = new AbortController();
-    this.activeTasks.set(sourcePath, controller);
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    const activeTask = { controller, settled };
+    this.activeTasks.set(sourcePath, activeTask);
     try {
       return await task(controller.signal);
     } finally {
-      if (this.activeTasks.get(sourcePath) === controller) {
+      if (this.activeTasks.get(sourcePath) === activeTask) {
         this.activeTasks.delete(sourcePath);
       }
+      settle();
     }
   }
 
   public cancel(sourcePath: string, message = "翻译任务已由用户取消。"): boolean {
-    const controller = this.activeTasks.get(sourcePath);
-    if (!controller) {
+    const activeTask = this.activeTasks.get(sourcePath);
+    if (!activeTask) {
       return false;
     }
-    controller.abort(new TranslationCancelledError(message));
+    activeTask.controller.abort(new TranslationCancelledError(message));
     return true;
   }
 
   public cancelAll(message = "翻译任务已取消。"): void {
-    for (const controller of this.activeTasks.values()) {
+    for (const { controller } of this.activeTasks.values()) {
       controller.abort(new TranslationCancelledError(message));
+    }
+  }
+
+  public async waitForIdle(sourcePath?: string): Promise<void> {
+    if (sourcePath !== undefined) {
+      await this.activeTasks.get(sourcePath)?.settled;
+    } else {
+      await Promise.all([...this.activeTasks.values()].map(({ settled }) => settled));
     }
   }
 }

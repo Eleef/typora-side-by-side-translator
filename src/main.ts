@@ -23,7 +23,7 @@ import {
   isTranslationCancelled,
   TranslationTaskCoordinator
 } from "./translation/TranslationTaskCoordinator";
-import { CredentialStorageMode, FileAssociationReason, PaneRenderState, PluginSettingsData, TargetLanguage, UiLanguage } from "./types";
+import { CredentialStorageMode, FileAssociation, FileAssociationReason, PaneRenderState, PluginSettingsData, TargetLanguage, UiLanguage } from "./types";
 import { TranslationPaneController } from "./ui/TranslationPaneController";
 
 PluginDiagnostics.markModuleEvaluated();
@@ -55,6 +55,9 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   private paneController!: TranslationPaneController;
   private readonly translationAuthorizer = new ExplicitTranslationAuthorizer();
   private readonly translationTasks = new TranslationTaskCoordinator();
+  private readonly translationFailures = new Map<string, { mode: "full" | "stale"; error: unknown }>();
+  private readonly cacheMigrations = new Map<string, Promise<void>>();
+  private pendingCacheMaintenance?: Promise<void>;
   private readonly translator = new TranslationOrchestrator(
     new OpenAICompatibleProvider(this.translationAuthorizer),
     fs,
@@ -175,6 +178,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       this.contentChangeTimer = null;
     }
     this.translationTasks.cancelAll(this.localizer?.t.messages.pluginUnloaded ?? "Plugin unloaded");
+    this.translationFailures.clear();
     this.paneController?.destroy();
     this.paneToggleButton = undefined;
     this.diagnostics.detach();
@@ -319,17 +323,27 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       throw new Error(this.getAssociationReason(association.reason, this.localizer.t.messages.cacheUnsupported));
     }
 
-    await this.cacheMaintenance.clearAssociation(association);
+    await this.runCacheMaintenance(async () => {
+      this.translationTasks.cancel(association.cacheTargetPath);
+      await this.translationTasks.waitForIdle(association.cacheTargetPath);
+      await this.cacheMaintenance.clearAssociation(association);
+      this.translationFailures.delete(association.cacheTargetPath);
+    });
     await this.diagnostics.info("current translation cache cleared", { sourcePath: association.sourcePath });
     await this.refreshState();
-    this.renderState.infoMessage = this.localizer.t.messages.currentCacheCleared;
-    this.renderState.warningMessage = undefined;
-    this.renderState.errorMessage = undefined;
-    this.paneController.render(this.renderState);
+    if (this.isCurrentDocument(association) && !this.translationTasks.isRunning(association.cacheTargetPath)) {
+      this.renderState.infoMessage = this.localizer.t.messages.currentCacheCleared;
+      this.renderPane();
+    }
   }
 
   public async clearAllCaches(): Promise<void> {
-    await this.cacheMaintenance.clearAll();
+    await this.runCacheMaintenance(async () => {
+      this.translationTasks.cancelAll();
+      await this.translationTasks.waitForIdle();
+      await this.cacheMaintenance.clearAll();
+      this.translationFailures.clear();
+    });
     await this.diagnostics.info("all translation caches cleared");
     await this.refreshState();
     this.renderState.infoMessage = this.localizer.t.messages.allCachesCleared;
@@ -340,6 +354,21 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
 
   public async clearDiagnostics(): Promise<void> {
     await this.diagnostics.clear();
+  }
+
+  private async runCacheMaintenance(operation: () => Promise<void>): Promise<void> {
+    const pending = (this.pendingCacheMaintenance ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      await this.refreshPromise?.catch(() => undefined);
+      await operation();
+    });
+    this.pendingCacheMaintenance = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.pendingCacheMaintenance === pending) {
+        this.pendingCacheMaintenance = undefined;
+      }
+    }
   }
 
   public async eraseAllLocalData(): Promise<void> {
@@ -360,16 +389,19 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       ].map((filename) => corePath.join(logDirectory, filename))
     ];
 
-    this.translationTasks.cancelAll(this.localizer.t.messages.pluginUnloaded);
-    this.sessionCredentials.clear();
-    await this.cacheMaintenance.eraseAll();
-    await this.diagnostics.clear();
-    this.app.plugins.disablePlugin(this.manifest.id);
-    for (const targetPath of pathsToRemove) {
-      if (await fs.exists(targetPath)) {
-        await fs.remove(targetPath);
+    await this.runCacheMaintenance(async () => {
+      this.translationTasks.cancelAll(this.localizer.t.messages.pluginUnloaded);
+      await this.translationTasks.waitForIdle();
+      this.sessionCredentials.clear();
+      await this.cacheMaintenance.eraseAll();
+      await this.diagnostics.clear();
+      this.app.plugins.disablePlugin(this.manifest.id);
+      for (const targetPath of pathsToRemove) {
+        if (await fs.exists(targetPath)) {
+          await fs.remove(targetPath);
+        }
       }
-    }
+    });
   }
 
   private async initializeSettings(): Promise<void> {
@@ -593,11 +625,6 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         this.runBackground("file open refresh failed", this.refreshState());
       })
     );
-    this.register(
-      this.app.workspace.on("file:will-open", () => {
-        this.translationTasks.cancelAll(this.localizer.t.messages.fileChanged);
-      })
-    );
   }
 
   private registerEditorEvents(): void {
@@ -621,7 +648,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   private async refreshState(): Promise<void> {
-    if (this.disposed) {
+    if (this.disposed || this.pendingCacheMaintenance) {
       return;
     }
     this.requestedRefreshRevision += 1;
@@ -662,7 +689,7 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   private async doRefreshState(revision: number): Promise<void> {
-    if (this.disposed) {
+    if (this.disposed || this.pendingCacheMaintenance) {
       return;
     }
     const association = this.getCurrentAssociation();
@@ -698,26 +725,34 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     if (!this.isRefreshCurrent(revision, association)) {
       return;
     }
+    const isTranslating = this.translationTasks.isRunning(association.cacheTargetPath);
+    const failure = this.translationFailures.get(association.cacheTargetPath);
     this.renderState = {
       association,
       targetMarkdown: state.targetMarkdown,
-      translatedBlocks: this.extractTranslatedBlocks(state.targetMarkdown),
+      translatedBlocks: this.translator.getPreviewTranslations(state.targetMarkdown, state.blocks, state.map),
       blocks: state.blocks,
       isVisible: this.paneVisible,
       staleCount: state.staleCount,
       targetLang: runtime.targetLang,
       paneWidthPercent,
       toolbarDisplayMode: runtime.toolbarDisplayMode,
-      isTranslating: this.translationTasks.isRunning(association.cacheTargetPath),
+      isTranslating,
+      retryMode: failure?.mode,
       warningMessage:
-        state.staleCount > 0 && !!state.targetMarkdown ? this.localizer.t.messages.sourceUpdated : undefined,
-      errorMessage: undefined,
+        !isTranslating && state.staleCount > 0 && !!state.targetMarkdown
+          ? this.localizer.t.messages.sourceUpdated
+          : undefined,
+      errorMessage: failure ? this.formatUserError(failure.error) : undefined,
       infoMessage: undefined
     };
     this.renderPane();
   }
 
   private async translateCurrentFile(mode: "full" | "stale"): Promise<void> {
+    if (this.disposed || this.pendingCacheMaintenance) {
+      return;
+    }
     const association = this.getCurrentAssociation();
     if (!association.isSupportedSource) {
       this.renderState = {
@@ -742,76 +777,35 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
       return;
     }
     if (this.translationTasks.isRunning(association.cacheTargetPath)) {
-      this.renderState = {
-        ...this.renderState,
-        association,
-        isVisible: true,
-        warningMessage: this.localizer.t.messages.taskAlreadyRunning
-      };
       this.paneVisible = true;
-      this.renderPane();
+      await this.refreshState();
       return;
     }
 
     const sourceMarkdown = this.readCurrentMarkdown();
     this.paneVisible = true;
-    this.renderState = {
-      ...this.renderState,
-      association,
-      isVisible: true,
-      paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
-      toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
-      targetLang: association.targetLang,
-      isTranslating: true,
-      retryMode: undefined,
-      errorMessage: undefined,
-      infoMessage: undefined,
-      warningMessage:
-        mode === "stale" ? this.localizer.t.messages.refreshingStale : this.localizer.t.messages.generatingTranslation
-    };
-    this.renderPane();
+    this.translationFailures.delete(association.cacheTargetPath);
 
+    const task = this.translationTasks.run(association.cacheTargetPath, async (signal) => {
+      await this.migrateLegacyAssociationCache(association);
+      const authorization = this.translationAuthorizer.authorize(
+        mode === "full" ? "translate-current-file" : "refresh-stale-blocks"
+      );
+      return this.translator.translate(association, sourceMarkdown, runtimeSettings, mode, authorization, signal);
+    });
+    this.runBackground("translation pane refresh failed", this.refreshState());
+
+    let notice: Pick<PaneRenderState, "infoMessage" | "warningMessage"> = {};
     try {
-      const result = await this.translationTasks.run(association.cacheTargetPath, async (signal) => {
-        await this.migrateLegacyAssociationCache(association);
-        const authorization = this.translationAuthorizer.authorize(
-          mode === "full" ? "translate-current-file" : "refresh-stale-blocks"
-        );
-        return this.translator.translate(
-          association,
-          sourceMarkdown,
-          runtimeSettings,
-          mode,
-          authorization,
-          signal
-        );
-      });
-      await this.diagnostics.info("translate command success", {
+      const result = await task;
+      void this.diagnostics.info("translate command success", {
         mode,
         sourcePath: association.sourcePath,
         cacheTargetPath: association.cacheTargetPath,
         blockCount: result.blocks.length
       });
-      if (this.disposed || !this.isSameAssociation(this.getCurrentAssociation(), association)) {
-        return;
-      }
-      if (this.readCurrentMarkdown() !== sourceMarkdown) {
-        await this.refreshState();
-        return;
-      }
       const staleCount = result.map.blocks.filter((block) => block.stale).length;
-      this.renderState = {
-        association,
-        targetMarkdown: result.markdown,
-        translatedBlocks: result.translatedBlocks,
-        blocks: result.blocks,
-        isVisible: this.paneVisible,
-        staleCount,
-        targetLang: association.targetLang,
-        paneWidthPercent: this.getRuntimeSettings().paneWidthPercent,
-        toolbarDisplayMode: this.getRuntimeSettings().toolbarDisplayMode,
-        isTranslating: false,
-        retryMode: undefined,
+      notice = {
         infoMessage:
           staleCount === 0
             ? this.localizer.format(this.localizer.t.messages.cacheUpdated, { path: association.cacheTargetPath })
@@ -819,34 +813,36 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
         warningMessage:
           staleCount > 0
             ? this.localizer.format(this.localizer.t.messages.manualBlocksPreserved, { count: staleCount })
-            : undefined,
-        errorMessage: undefined
+            : undefined
       };
     } catch (error) {
       if (isTranslationCancelled(error)) {
-        await this.diagnostics.info("translate command cancelled", {
+        void this.diagnostics.info("translate command cancelled", {
           mode,
           sourcePath: association.sourcePath
         });
+        notice.infoMessage = this.localizer.t.messages.translationCancelled;
       } else {
-        await this.diagnostics.error("translate command failed", this.errorMeta(error));
+        if (!this.disposed) {
+          this.translationFailures.set(association.cacheTargetPath, { mode, error });
+        }
+        void this.diagnostics.error("translate command failed", { mode, sourcePath: association.sourcePath, ...this.errorMeta(error) });
       }
-      if (this.disposed || !this.isSameAssociation(this.getCurrentAssociation(), association)) {
-        return;
-      }
+    }
+    if (!this.isCurrentDocument(association) || this.pendingCacheMaintenance) {
+      return;
+    }
+    await this.refreshState();
+    if (this.isCurrentDocument(association) &&
+      !this.translationTasks.isRunning(association.cacheTargetPath) &&
+      this.readCurrentMarkdown() === sourceMarkdown &&
+      (notice.infoMessage || notice.warningMessage)) {
       this.renderState = {
         ...this.renderState,
-        association,
-        isVisible: this.paneVisible,
-        isTranslating: false,
-        retryMode: isTranslationCancelled(error) ? undefined : mode,
-        warningMessage: undefined,
-        infoMessage: isTranslationCancelled(error) ? this.localizer.t.messages.translationCancelled : undefined,
-        errorMessage: isTranslationCancelled(error) ? undefined : this.formatUserError(error)
+        ...notice
       };
+      this.renderPane();
     }
-
-    this.renderPane();
   }
 
   private cancelCurrentTranslation(): void {
@@ -854,14 +850,10 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     if (!association.isSupportedSource || !this.translationTasks.cancel(association.cacheTargetPath)) {
       return;
     }
-    this.renderState = {
-      ...this.renderState,
-      association,
-      isVisible: true,
-      warningMessage: this.localizer.t.messages.cancellingTranslation,
-      errorMessage: undefined
-    };
-    this.renderPane();
+    if (this.renderState.association && this.isSameAssociation(this.renderState.association, association)) {
+      this.renderState.warningMessage = this.localizer.t.messages.cancellingTranslation;
+      this.renderPane();
+    }
   }
 
   private async exportTargetFile(): Promise<void> {
@@ -938,6 +930,21 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
   }
 
   private async migrateLegacyAssociationCache(association: ReturnType<FileAssociationService["resolve"]>): Promise<void> {
+    const key = association.cacheTargetPath;
+    const pending = this.cacheMigrations.get(key);
+    if (pending) {
+      return pending;
+    }
+    const migration = this.moveLegacyCache(association);
+    this.cacheMigrations.set(key, migration);
+    try {
+      await migration;
+    } finally {
+      this.cacheMigrations.delete(key);
+    }
+  }
+
+  private async moveLegacyCache(association: FileAssociation): Promise<void> {
     const pairs: Array<[string | undefined, string]> = [
       [association.legacyCacheTargetPath, association.cacheTargetPath],
       [association.legacyCacheMapPath, association.cacheMapPath]
@@ -964,18 +971,17 @@ export default class TyporaSideBySideTranslatorPlugin extends Plugin<PluginSetti
     association: { sourcePath: string; cacheTargetPath: string }
   ): boolean {
     return (
-      !this.disposed &&
       revision === this.requestedRefreshRevision &&
-      this.isSameAssociation(this.getCurrentAssociation(), association)
+      this.isCurrentDocument(association)
     );
+  }
+
+  private isCurrentDocument(association: Pick<FileAssociation, "sourcePath" | "cacheTargetPath">): boolean {
+    return !this.disposed && this.isSameAssociation(this.getCurrentAssociation(), association);
   }
 
   private readCurrentMarkdown(): string {
     return this.app.features.markdownEditor.getMarkdown();
-  }
-
-  private extractTranslatedBlocks(markdown: string | null): Map<string, string> {
-    return this.translator.parseCachedTranslations(markdown);
   }
 
   private getTranslationsCacheRoot(): string {

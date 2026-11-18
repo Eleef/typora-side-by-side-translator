@@ -1,5 +1,6 @@
 import { PluginSettingsData, TranslationRequestPayload, TranslationResponsePayload } from "../types";
 import { UserFacingError, UserFacingErrorCode } from "../i18n/UserFacingError";
+import { planYamlFrontmatterTranslation } from "../markdown/YamlFrontmatter";
 import { normalizeAndValidateBaseUrl } from "../security/EndpointPolicy";
 import { delay } from "../utils";
 import { ExplicitTranslationAuthorization, ExplicitTranslationAuthorizer } from "./ExplicitTranslationAuthorizer";
@@ -10,6 +11,9 @@ import { throwIfTranslationCancelled } from "./TranslationTaskCoordinator";
 export const MAX_TRANSLATION_RESPONSE_CHARS = 4_000_000;
 export const MAX_TRANSLATION_RESPONSE_BYTES = 8_000_000;
 const MAX_ATTEMPTS = 3;
+const MAX_TEXT_FALLBACK_BLOCKS = 2;
+const MAX_TEXT_FALLBACK_SEGMENTS = 24;
+const MAX_TEXT_FALLBACK_CHARS = 1200;
 const RESERVED_CONTROL_COMMENT = /<!--\s*typora-(?:side-by-side|bilingual):block-(?:start|end)\b/i;
 
 class RetryableTranslationError extends UserFacingError {
@@ -38,21 +42,29 @@ const DEFAULT_RUNTIME: TranslationProviderRuntime = {
   random: Math.random
 };
 
-function buildSystemPrompt(settings: PluginSettingsData): string {
+function buildSystemPrompt(settings: PluginSettingsData, mode: "markdown" | "text"): string {
   const language = getTargetLanguageDefinition(settings.targetLang);
   return [
     "你是 Markdown 文档翻译引擎。",
     `将可翻译内容翻译为 ${language.promptName}（${language.code}）。`,
     "自动识别源语言；如果内容已经是目标语言，保持原意和自然表达，不要添加说明。",
-    "保持 Markdown 结构，不要输出任何解释。",
-    "所有 TYPORASIDEBYSIDEPROTECTED...TOKEN 标记必须原样保留且各出现一次。",
-    "保留链接 URL、代码、数学公式、HTML 原样。",
+    ...(mode === "markdown" ? [
+      "保持 Markdown 结构，不要输出任何解释。",
+      "保留原文粗体标记和相邻正文之间的分隔空格，例如 **标签：** 正文。",
+      "对于 format 为 yaml-values 的块，sourceMarkdown 是 JSON 对象。只翻译字符串值，保留所有键；translatedMarkdown 返回同样结构的 JSON 字符串，不要添加 YAML、代码围栏或解释。",
+      "所有 TYPORASIDEBYSIDEPROTECTED...TOKEN 标记必须原样保留且各出现一次。",
+      "保留链接 URL、代码、数学公式、HTML 原样。"
+    ] : [
+      "这些是从原文按顺序提取的纯文本片段。相邻片段可提供上下文，但必须独立返回并保持各自的含义。",
+      "保留每个 ID，不要合并、拆分或省略片段。translatedMarkdown 字段只返回纯文本，不添加 Markdown 格式。"
+    ]),
     "只返回 JSON，格式为 {\"blocks\":[{\"id\":\"...\",\"translatedMarkdown\":\"...\"}]}。"
   ].join("\n");
 }
 
 export class OpenAICompatibleProvider {
   private readonly structureProtector = new MarkdownStructureProtector();
+  private readonly fallbackUsedByCommand = new WeakSet<ExplicitTranslationAuthorization>();
 
   public constructor(
     private readonly authorizer: ExplicitTranslationAuthorizer,
@@ -72,17 +84,91 @@ export class OpenAICompatibleProvider {
     }
 
     const protectedBlocks = blocks.map((block) => {
+      if (block.format === "yaml-values") {
+        const yaml = planYamlFrontmatterTranslation(block.sourceMarkdown);
+        if (!yaml) {
+          throw new UserFacingError("responseBlockInvalid", { detail: "invalid YAML translation input" });
+        }
+        return { request: { ...block, sourceMarkdown: JSON.stringify(yaml.values) }, yaml };
+      }
       const protection = this.structureProtector.protect(block.sourceMarkdown);
       return {
         request: { ...block, sourceMarkdown: protection.markdown },
         protection
       };
     });
+    const response = await this.requestBlocks(settings, protectedBlocks.map((item) => item.request), "markdown", signal);
+    const receivedById = new Map(response.blocks.map((block) => [block.id, block.translatedMarkdown]));
+    const results = new Map<string, string>();
+    const pending: Array<{ id: string; plan: ReturnType<ProtectedMarkdown["planTextFallback"]>; segmentIds: string[] }> = [];
+    const fallbackRequests: TranslationRequestPayload[] = [];
+    let fallbackChars = 0;
+    for (const { request, protection, yaml } of protectedBlocks) {
+      const translated = receivedById.get(request.id)!;
+      if (yaml) {
+        let rendered: string | null = null;
+        try {
+          rendered = yaml.render(JSON.parse(translated));
+        } catch {
+          rendered = null;
+        }
+        if (rendered === null || RESERVED_CONTROL_COMMENT.test(rendered)) {
+          throw new UserFacingError("responseBlockInvalid", { detail: "invalid YAML translation values" });
+        }
+        results.set(request.id, rendered);
+        continue;
+      }
+      try {
+        results.set(request.id, protection.restoreAndValidate(translated));
+      } catch (error) {
+        if (!(error instanceof UserFacingError) ||
+          error.code !== "markdownProtectionFailed" || error.values.reason !== "structure") {
+          throw error;
+        }
+        if (this.fallbackUsedByCommand.has(authorization!) || pending.length >= MAX_TEXT_FALLBACK_BLOCKS) {
+          throw new UserFacingError("markdownFallbackLimit");
+        }
+        const plan = protection.planTextFallback();
+        if (plan.segments.length === 0) {
+          throw error;
+        }
+        fallbackChars = plan.segments.reduce((total, segment) => total + segment.length, fallbackChars);
+        if (fallbackRequests.length + plan.segments.length > MAX_TEXT_FALLBACK_SEGMENTS ||
+          fallbackChars > MAX_TEXT_FALLBACK_CHARS) {
+          throw new UserFacingError("markdownFallbackLimit");
+        }
+        const segmentIds = plan.segments.map((sourceMarkdown, index) => {
+          const id = `${request.id}:text:${index + 1}`;
+          fallbackRequests.push({ id, sourceMarkdown });
+          return id;
+        });
+        pending.push({ id: request.id, plan, segmentIds });
+      }
+    }
+    let fallbackResults: TranslationResponsePayload["blocks"] = [];
+    if (fallbackRequests.length > 0) {
+      this.fallbackUsedByCommand.add(authorization!);
+      fallbackResults = (await this.requestBlocks(settings, fallbackRequests, "text", signal)).blocks;
+    }
+    const fallbackById = new Map(fallbackResults.map((block) => [block.id, block.translatedMarkdown]));
+    for (const { id, plan, segmentIds } of pending) {
+      results.set(id, plan.render(segmentIds.map((segmentId) => fallbackById.get(segmentId)!)));
+    }
+    return { blocks: blocks.map(({ id }) => ({ id, translatedMarkdown: results.get(id)! })) };
+  }
+
+  private async requestBlocks(
+    settings: PluginSettingsData,
+    blocks: TranslationRequestPayload[],
+    mode: "markdown" | "text",
+    signal?: AbortSignal
+  ): Promise<TranslationResponsePayload> {
     const baseUrl = normalizeAndValidateBaseUrl(settings.baseUrl);
     const url = `${baseUrl}/chat/completions`;
     let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const maxAttempts = mode === "text" ? 1 : MAX_ATTEMPTS;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       throwIfTranslationCancelled(signal);
       if (attempt > 0) {
         const retryAfterMs = lastError instanceof RetryableTranslationError ? lastError.retryAfterMs : undefined;
@@ -114,12 +200,12 @@ export class OpenAICompatibleProvider {
             model: settings.model,
             temperature: 0.2,
             messages: [
-              { role: "system", content: buildSystemPrompt(settings) },
+              { role: "system", content: buildSystemPrompt(settings, mode) },
               {
                 role: "user",
                 content: JSON.stringify({
                   targetLang: settings.targetLang,
-                  blocks: protectedBlocks.map((item) => item.request)
+                  blocks
                 })
               }
             ]
@@ -166,15 +252,7 @@ export class OpenAICompatibleProvider {
         }
 
         this.validateResponse(parsed, blocks);
-        const protectionsById = new Map(
-          protectedBlocks.map((item) => [item.request.id, item.protection] as const)
-        );
-        return {
-          blocks: parsed.blocks.map((block) => ({
-            id: block.id,
-            translatedMarkdown: this.restoreProtectedMarkdown(block, protectionsById.get(block.id))
-          }))
-        };
+        return parsed;
       } catch (error) {
         throwIfTranslationCancelled(signal);
         const normalizedError = error instanceof Error ? error : new Error(String(error));
@@ -195,16 +273,6 @@ export class OpenAICompatibleProvider {
     }
 
     throw lastError ?? new UserFacingError("requestFailed");
-  }
-
-  private restoreProtectedMarkdown(
-    block: TranslationResponsePayload["blocks"][number],
-    protection: ProtectedMarkdown | undefined
-  ): string {
-    if (!protection) {
-      throw new UserFacingError("responseBlockInvalid", { detail: `unknown block ${block.id}` });
-    }
-    return protection.restoreAndValidate(block.translatedMarkdown);
   }
 
   private validateResponse(response: TranslationResponsePayload, requests: TranslationRequestPayload[]): void {
