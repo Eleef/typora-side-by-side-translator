@@ -31,6 +31,7 @@
     "cancelTranslation": "번역 취소"
   },
   "pane": {
+    "statusToggle": "대역",
     "resizeHandle": "드래그하여 너비 조절, 두 번 클릭하여 50/50 복원",
     "openToolbar": "번역 도구 모음 열기",
     "moreActions": "더 보기",
@@ -125,7 +126,6 @@
     "manualBlocksPreserved": "수동 편집된 번역 블록 {count}개를 유지했습니다. 해당 원문이 바뀌어 오래된 상태로 남습니다.",
     "translationCancelled": "번역 작업을 취소했습니다. 기존 캐시는 덮어쓰지 않았습니다.",
     "cancellingTranslation": "번역 작업 취소 중...",
-    "exportRequiresTranslation": "먼저 '전체 번역'을 실행하세요. 내보낼 캐시 번역이 없습니다.",
     "confirmOverwriteExport": "같은 이름의 번역 파일이 이미 있습니다:\n{path}\n\n덮어쓸까요?",
     "exportCancelled": "내보내기를 취소하고 기존 번역 파일을 유지했습니다.",
     "exported": "번역을 {path}(으)로 내보냈습니다",
@@ -133,6 +133,7 @@
     "persistedApiKeyInternalOnly": "저장된 API key는 플러그인 내부에서만 변경할 수 있습니다."
   },
   "errors": {
+    "exportRequiresTranslation": "먼저 '전체 번역'을 실행하세요. 내보낼 캐시 번역이 없습니다.",
     "invalidBaseUrl": "baseUrl이 올바른 URL이 아닙니다.",
     "baseUrlCredentials": "baseUrl에 사용자 이름이나 비밀번호를 포함할 수 없습니다.",
     "baseUrlQuery": "baseUrl에 쿼리 매개변수나 페이지 조각을 포함할 수 없습니다.",
@@ -150,6 +151,8 @@
     "cacheLanguageMismatch": "캐시의 대상 언어가 현재 대상과 다릅니다. 대상 언어를 다시 선택한 후 번역하세요.",
     "cacheInvalidRefresh": "번역 캐시 또는 매핑 파일이 없거나 손상되었거나 읽을 수 없습니다. 기존 번역을 보호하기 위해 새로 고침을 중단했습니다. 캐시를 내보내거나 백업한 후 '전체 번역'을 실행하세요.",
     "cacheInvalidExport": "번역 캐시 또는 매핑 파일이 없거나 손상되었거나 읽을 수 없어 내보내기를 중단했습니다.",
+    "cacheStaleExport": "번역문이 현재 원문과 일치하지 않습니다. 번역을 갱신하거나 전체를 다시 번역한 후 내보내세요.",
+    "cacheRecoveryRequired": "이전 번역 백업을 복원할 수 없습니다. 남은 캐시 파일을 백업한 다음 캐시를 지우고 다시 번역하세요.",
     "cacheInvalid": "캐시된 번역과 매핑 파일이 일치하지 않거나 손상되었습니다.",
     "cacheLegacy": "캐시가 이전 블록 식별 방식을 사용합니다. 수동 번역을 보호하려면 '전체 번역'으로 명시적으로 다시 만드세요.",
     "manualStructureConflict": "문서 구조와 수동 편집 번역이 모두 바뀌었습니다. 블록 불일치를 막기 위해 새로 고침을 중단했습니다. 번역을 내보내거나 백업한 후 '전체 번역'을 실행하세요.",

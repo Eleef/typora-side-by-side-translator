@@ -74,6 +74,13 @@ function createMemoryStorage(initialFiles: Array<[string, string]>): {
         writes.push(targetPath);
       },
       async mkdir() {},
+      async copy(sourcePath, targetPath) {
+        const content = files.get(sourcePath);
+        if (content === undefined) {
+          throw new Error(`missing ${sourcePath}`);
+        }
+        files.set(targetPath, content);
+      },
       async move(sourcePath, targetPath) {
         const content = files.get(sourcePath);
         if (content === undefined) {
@@ -437,6 +444,75 @@ test("cache pair commit rolls back both files when the second replacement fails"
   assert.equal(storage.files.get(ASSOCIATION.cacheTargetPath), oldTarget);
   assert.equal(storage.files.get(ASSOCIATION.cacheMapPath), JSON.stringify(oldMap));
   assert.equal([...storage.files.keys()].some((targetPath) => /\.(?:tmp|bak)$/.test(targetPath)), false);
+});
+
+test("export rejects inserted, reordered, removed and edited source blocks", async () => {
+  const source = "Alpha.\n\nBeta.";
+  const storage = createMemoryStorage([]);
+  const orchestrator = new TranslationOrchestrator(createProvider(), storage.adapter, { dirname: () => "/cache" });
+  const authorizer = new ExplicitTranslationAuthorizer();
+  await orchestrator.translate(
+    ASSOCIATION,
+    source,
+    TRANSLATION_SETTINGS,
+    "full",
+    authorizer.authorize("translate-current-file")
+  );
+  assert.equal(await orchestrator.buildExportMarkdown(ASSOCIATION, source), "translated: Alpha.\n\ntranslated: Beta.");
+  for (const edited of ["New.\n\nAlpha.\n\nBeta.", "Beta.\n\nAlpha.", "Alpha.", "Alpha changed.\n\nBeta."]) {
+    await assert.rejects(
+      orchestrator.buildExportMarkdown(ASSOCIATION, edited),
+      (error) => error instanceof UserFacingError && error.code === "cacheStaleExport"
+    );
+  }
+});
+
+test("cache recovery restores matching backups after interruption and retains them on a failed retry", async () => {
+  const targetBackup = `${ASSOCIATION.cacheTargetPath}.bak`;
+  const mapBackup = `${ASSOCIATION.cacheMapPath}.bak`;
+  const storage = createMemoryStorage([]);
+  const orchestrator = new TranslationOrchestrator(createProvider(), storage.adapter, { dirname: () => "/cache" });
+  const authorizer = new ExplicitTranslationAuthorizer();
+  const translate = (source: string) => orchestrator.translate(
+    ASSOCIATION, source, TRANSLATION_SETTINGS, "full", authorizer.authorize("translate-current-file")
+  );
+  await translate("Original.");
+  const target = storage.files.get(ASSOCIATION.cacheTargetPath)!;
+  const map = storage.files.get(ASSOCIATION.cacheMapPath)!;
+  const partial = createMemoryStorage([[targetBackup, target], [ASSOCIATION.cacheMapPath, map]]);
+  const partialReader = new TranslationOrchestrator(createProvider(), partial.adapter, { dirname: () => "/cache" });
+  assert.equal(await partialReader.buildExportMarkdown(ASSOCIATION, "Original."), "translated: Original.");
+  assert.equal(partial.files.get(ASSOCIATION.cacheTargetPath), target);
+  assert.equal(partial.files.get(targetBackup), target);
+
+  storage.files.set(targetBackup, target);
+  storage.files.set(mapBackup, map);
+  storage.files.set(ASSOCIATION.cacheTargetPath, "Interrupted replacement");
+  storage.files.delete(ASSOCIATION.cacheMapPath);
+  storage.adapter.writeText = async () => { throw new Error("simulated write failure"); };
+
+  await assert.rejects(translate("Retry."), /simulated write failure/);
+  assert.equal(await orchestrator.buildExportMarkdown(ASSOCIATION, "Original."), "translated: Original.");
+  assert.equal(storage.files.get(targetBackup), target);
+  assert.equal(storage.files.get(mapBackup), map);
+});
+
+test("unrecoverable backups are left untouched and block translation before contacting the provider", async () => {
+  const mapBackup = `${ASSOCIATION.cacheMapPath}.bak`;
+  const storage = createMemoryStorage([[mapBackup, "incomplete recovery"]]);
+  let providerCalls = 0;
+  const orchestrator = new TranslationOrchestrator(createProvider(() => providerCalls += 1), storage.adapter, {
+    dirname: () => "/cache"
+  });
+  const authorizer = new ExplicitTranslationAuthorizer();
+  await assert.rejects(
+    orchestrator.translate(
+      ASSOCIATION, "Retry.", TRANSLATION_SETTINGS, "full", authorizer.authorize("translate-current-file")
+    ),
+    (error) => error instanceof UserFacingError && error.code === "cacheRecoveryRequired"
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(storage.files.get(mapBackup), "incomplete recovery");
 });
 
 test("translation task coordinator blocks duplicates and propagates cancellation", async () => {

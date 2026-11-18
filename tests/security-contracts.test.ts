@@ -548,7 +548,7 @@ test("schema 2 digest maps do not hash existing digests again", async () => {
   assert.equal(await migrateStoredTranslationHash(schemaTwoMap, digest), digest);
 });
 
-test("cache maintenance measures text files and removes only the selected language cache pair", async () => {
+test("cache maintenance removes only the selected language, including recoverable files", async () => {
   const removed: string[] = [];
   const directories = new Map<string, string[]>([
     ["/cache", ["doc", "root.map.json"]],
@@ -584,6 +584,8 @@ test("cache maintenance measures text files and removes only the selected langua
   const usage = await service.getUsage();
 
   assert.deepEqual(usage, { fileCount: 4, byteCount: 17 });
+  files.set("/cache/doc/article.zh.md.bak", "previous translation");
+  files.set("/cache/doc/article.zh.map.json.bak", "{}");
   await service.clearAssociation({
     sourcePath: "/source/article.md",
     cacheTargetPath: "/cache/doc/article.zh.md",
@@ -592,7 +594,10 @@ test("cache maintenance measures text files and removes only the selected langua
     targetLang: "zh-CN",
     isSupportedSource: true
   });
-  assert.deepEqual(removed, ["/cache/doc/article.zh.md", "/cache/doc/article.zh.map.json"]);
+  assert.deepEqual(removed, [
+    "/cache/doc/article.zh.md.bak", "/cache/doc/article.zh.map.json.bak",
+    "/cache/doc/article.zh.md", "/cache/doc/article.zh.map.json"
+  ]);
 });
 
 test("cache directory keys include a stable hash of the complete normalized source path", () => {

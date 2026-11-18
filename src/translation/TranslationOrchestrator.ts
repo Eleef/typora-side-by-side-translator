@@ -1,5 +1,6 @@
 import { BlockExtractionService } from "../markdown/BlockExtractionService";
 import { TRANSLATION_BLOCK_ID_ALGORITHM } from "../markdown/BlockIdentity";
+import { UserFacingError } from "../i18n/UserFacingError";
 import {
   FileAssociation,
   PluginSettingsData,
@@ -26,11 +27,19 @@ import {
 
 export type TranslationCacheStatus = "empty" | "valid" | "incomplete" | "invalid";
 
+interface CacheState {
+  map: TranslationMap | null;
+  targetMarkdown: string | null;
+  status: TranslationCacheStatus;
+  recoveryRequired?: boolean;
+}
+
 export interface TranslationStorageAdapter {
   exists(targetPath: string): Promise<boolean>;
   readText(targetPath: string): Promise<string>;
   writeText(targetPath: string, content: string): Promise<void>;
   mkdir(targetPath: string): Promise<void>;
+  copy(sourcePath: string, targetPath: string): Promise<void>;
   move(sourcePath: string, targetPath: string): Promise<void>;
   remove(targetPath: string): Promise<void>;
 }
@@ -52,6 +61,7 @@ export class TranslationOrchestrator {
   private readonly extractor = new BlockExtractionService();
   private readonly markdownCodec = new TranslationMarkdownCodec();
   private readonly requestPlanner = new TranslationRequestPlanner();
+  private readonly cacheOperations = new Map<string, Promise<unknown>>();
 
   public constructor(
     private readonly provider: TranslationProviderAdapter,
@@ -59,14 +69,29 @@ export class TranslationOrchestrator {
     private readonly pathAdapter: TranslationPathAdapter
   ) {}
 
-  public async loadExistingState(association: FileAssociation): Promise<{
-    map: TranslationMap | null;
-    targetMarkdown: string | null;
-    status: TranslationCacheStatus;
-  }> {
+  public loadExistingState(association: FileAssociation): Promise<CacheState> {
+    return this.withCacheOperation(association, async () => {
+      const existing = await this.readOrRecoverCache(association);
+      if (!existing.map || existing.targetMarkdown === null || usesTranslationDigests(existing.map)) {
+        return existing;
+      }
+      try {
+        await this.migrateLegacyMap(association, existing.map, existing.targetMarkdown);
+        return await this.readCachePair(association);
+      } catch {
+        return { ...existing, map: null, status: "invalid" };
+      }
+    });
+  }
+
+  private async readCachePair(
+    association: FileAssociation,
+    targetPath = association.cacheTargetPath,
+    mapPath = association.cacheMapPath
+  ): Promise<CacheState> {
     const [mapExists, targetExists] = await Promise.all([
-      this.storage.exists(association.cacheMapPath),
-      this.storage.exists(association.cacheTargetPath)
+      this.storage.exists(mapPath),
+      this.storage.exists(targetPath)
     ]);
     if (!mapExists && !targetExists) {
       return { map: null, targetMarkdown: null, status: "empty" };
@@ -75,7 +100,7 @@ export class TranslationOrchestrator {
     let normalizedTarget: string | null = null;
     if (targetExists) {
       try {
-        normalizedTarget = normalizeLineEndings(await this.storage.readText(association.cacheTargetPath));
+        normalizedTarget = normalizeLineEndings(await this.storage.readText(targetPath));
       } catch {
         return { map: null, targetMarkdown: null, status: "invalid" };
       }
@@ -85,19 +110,80 @@ export class TranslationOrchestrator {
     }
 
     try {
-      const mapRaw = await this.storage.readText(association.cacheMapPath);
-      const parsedMap = JSON.parse(mapRaw) as TranslationMap;
-      const map = usesTranslationDigests(parsedMap)
-        ? parsedMap
-        : await this.migrateLegacyMap(association, parsedMap, normalizedTarget);
-      if (!usesTranslationDigests(parsedMap)) {
-        normalizedTarget = normalizeLineEndings(await this.storage.readText(association.cacheTargetPath));
-      }
+      const map = JSON.parse(await this.storage.readText(mapPath)) as TranslationMap;
       this.validateCachePair(map, normalizedTarget, association);
       return { map, targetMarkdown: normalizedTarget, status: "valid" };
     } catch {
       return { map: null, targetMarkdown: normalizedTarget, status: "invalid" };
     }
+  }
+
+  private async readOrRecoverCache(association: FileAssociation): Promise<CacheState> {
+    const existing = await this.readCachePair(association);
+    if (existing.status === "valid") {
+      return existing;
+    }
+    const targetBackup = `${association.cacheTargetPath}.bak`;
+    const mapBackup = `${association.cacheMapPath}.bak`;
+    const [hasTargetBackup, hasMapBackup] = await Promise.all([
+      this.storage.exists(targetBackup),
+      this.storage.exists(mapBackup)
+    ]);
+    if (!hasTargetBackup && !hasMapBackup) {
+      return existing;
+    }
+
+    const targetPath = hasTargetBackup ? targetBackup : association.cacheTargetPath;
+    const mapPath = hasMapBackup ? mapBackup : association.cacheMapPath;
+    const backup = await this.readCachePair(association, targetPath, mapPath);
+    if (backup.status !== "valid") {
+      return { ...existing, status: "invalid", recoveryRequired: true };
+    }
+
+    try {
+      for (const [savedPath, restorePath] of [
+        [targetPath, association.cacheTargetPath],
+        [mapPath, association.cacheMapPath]
+      ]) {
+        if (savedPath === restorePath) {
+          continue;
+        }
+        const stagedPath = `${restorePath}.tmp`;
+        await this.storage.copy(savedPath, stagedPath);
+        await this.storage.move(stagedPath, restorePath);
+      }
+      const restored = await this.readCachePair(association);
+      if (restored.status === "valid") {
+        return restored;
+      }
+    } catch {
+      return { ...existing, status: "invalid", recoveryRequired: true };
+    }
+    return { ...existing, status: "invalid", recoveryRequired: true };
+  }
+
+  private async withCacheOperation<Result>(
+    association: FileAssociation,
+    operation: () => Promise<Result>
+  ): Promise<Result> {
+    const key = association.cacheTargetPath;
+    const pending = this.cacheOperations.get(key);
+    const running = (pending ? pending.catch(() => undefined) : Promise.resolve()).then(operation);
+    this.cacheOperations.set(key, running);
+    try {
+      return await running;
+    } finally {
+      if (this.cacheOperations.get(key) === running) {
+        this.cacheOperations.delete(key);
+      }
+    }
+  }
+
+  private countStaleBlocks(blocks: TranslationBlock[], map: TranslationMap): number {
+    const mapById = new Map(map.blocks.map((block) => [block.id, block]));
+    const currentIds = new Set(blocks.map((block) => block.id));
+    const changedCount = blocks.filter((block) => mapById.get(block.id)?.sourceHash !== block.sourceHash).length;
+    return changedCount + map.blocks.filter((block) => !currentIds.has(block.id)).length;
   }
 
   public async computeStaleState(
@@ -120,22 +206,11 @@ export class TranslationOrchestrator {
       };
     }
 
-    const mapById = new Map(existing.map.blocks.map((block) => [block.id, block]));
-    let staleCount = 0;
-    for (const block of blocks) {
-      const previous = mapById.get(block.id);
-      if (!previous || previous.sourceHash !== block.sourceHash) {
-        staleCount += 1;
-      }
-    }
-    const currentIds = new Set(blocks.map((block) => block.id));
-    staleCount += existing.map.blocks.filter((block) => !currentIds.has(block.id)).length;
-
     return {
       blocks,
       targetMarkdown: existing.targetMarkdown,
       map: existing.map,
-      staleCount
+      staleCount: this.countStaleBlocks(blocks, existing.map)
     };
   }
 
@@ -153,6 +228,9 @@ export class TranslationOrchestrator {
     }
     const blocks = await this.extractor.extract(sourceMarkdown);
     const existing = await this.loadExistingState(association);
+    if (existing.recoveryRequired) {
+      throw new UserFacingError("cacheRecoveryRequired");
+    }
     if (mode === "stale" && (existing.status === "incomplete" || existing.status === "invalid")) {
       throw new UserFacingError("cacheInvalidRefresh");
     }
@@ -198,7 +276,9 @@ export class TranslationOrchestrator {
       generation
     );
     throwIfTranslationCancelled(signal);
-    await this.writeCachePair(association, `${markdown}\n`, `${JSON.stringify(map, null, 2)}\n`, signal);
+    await this.withCacheOperation(association, () =>
+      this.writeCachePair(association, `${markdown}\n`, `${JSON.stringify(map, null, 2)}\n`, signal)
+    );
 
     return {
       markdown,
@@ -211,8 +291,11 @@ export class TranslationOrchestrator {
   public async buildExportMarkdown(association: FileAssociation, sourceMarkdown: string): Promise<string> {
     const blocks = await this.extractor.extract(sourceMarkdown);
     const existing = await this.loadExistingState(association);
-    if (existing.status !== "valid") {
-      throw new UserFacingError("cacheInvalidExport");
+    if (!existing.map) {
+      throw new UserFacingError(existing.status === "empty" ? "exportRequiresTranslation" : "cacheInvalidExport");
+    }
+    if (this.countStaleBlocks(blocks, existing.map) > 0) {
+      throw new UserFacingError("cacheStaleExport");
     }
     const translatedBlocks = this.markdownCodec.parseCache(existing.targetMarkdown);
     return this.markdownCodec.buildExport(blocks, translatedBlocks);
@@ -226,7 +309,7 @@ export class TranslationOrchestrator {
     association: FileAssociation,
     legacyMap: TranslationMap,
     targetMarkdown: string
-  ): Promise<TranslationMap> {
+  ): Promise<void> {
     const currentTranslations = this.markdownCodec.parseCache(targetMarkdown);
     const blocks: TranslationMapBlock[] = [];
     for (const block of legacyMap.blocks ?? []) {
@@ -260,7 +343,6 @@ export class TranslationOrchestrator {
       `${migratedTarget}\n`,
       `${JSON.stringify(migrated, null, 2)}\n`
     );
-    return migrated;
   }
 
   private async buildMap(
@@ -388,15 +470,20 @@ export class TranslationOrchestrator {
     let mapBackedUp = false;
     let targetCommitted = false;
     let mapCommitted = false;
+    let backupCycleStarted = false;
     let commitCompleted = false;
     let rollbackCompleted = false;
+
+    throwIfTranslationCancelled(signal);
+    const current = await this.readOrRecoverCache(association);
+    if (current.recoveryRequired) {
+      throw new UserFacingError("cacheRecoveryRequired");
+    }
 
     await this.storage.mkdir(this.pathAdapter.dirname(association.cacheTargetPath));
     await Promise.all([
       this.safeRemove(targetTemp),
-      this.safeRemove(mapTemp),
-      this.safeRemove(targetBackup),
-      this.safeRemove(mapBackup)
+      this.safeRemove(mapTemp)
     ]);
 
     try {
@@ -411,6 +498,12 @@ export class TranslationOrchestrator {
       this.validateCachePair(parsedMap, normalizeLineEndings(writtenTarget), association);
       throwIfTranslationCancelled(signal);
 
+      for (const backupPath of [targetBackup, mapBackup]) {
+        if (await this.storage.exists(backupPath)) {
+          await this.storage.remove(backupPath);
+        }
+      }
+      backupCycleStarted = true;
       if (await this.storage.exists(association.cacheTargetPath)) {
         await this.storage.move(association.cacheTargetPath, targetBackup);
         targetBackedUp = true;
@@ -450,7 +543,7 @@ export class TranslationOrchestrator {
       throw error;
     } finally {
       await Promise.all([this.safeRemove(targetTemp), this.safeRemove(mapTemp)]);
-      if (commitCompleted || rollbackCompleted) {
+      if (commitCompleted || (backupCycleStarted && rollbackCompleted)) {
         await Promise.all([this.safeRemove(targetBackup), this.safeRemove(mapBackup)]);
       }
     }
@@ -466,4 +559,3 @@ export class TranslationOrchestrator {
     }
   }
 }
-import { UserFacingError } from "../i18n/UserFacingError";

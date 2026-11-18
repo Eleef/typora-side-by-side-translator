@@ -722,7 +722,8 @@ export class TranslationPaneController {
     retranslateButton.disabled = state.isTranslating || !supported;
     retranslateButton.classList.toggle("is-hidden", action === "translate-all");
     exportButton.textContent = this.localizer.t.pane.exportTarget;
-    exportButton.disabled = state.isTranslating || !hasTranslation;
+    exportButton.disabled = state.isTranslating || !hasTranslation || state.staleCount > 0;
+    exportButton.title = hasTranslation && state.staleCount > 0 ? this.localizer.t.errors.cacheStaleExport : "";
     this.syncMoreMenu();
   }
 

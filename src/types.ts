@@ -63,6 +63,7 @@ export interface PluginSettingsData {
   storedApiKey: string;
   sessionCredentialConfigured: boolean;
   translationDisclosureAccepted: boolean;
+  paneVisible?: boolean;
   paneWidthPercent: number;
   toolbarDisplayMode: "compact" | "collapsed";
   toolbarInteractionVersion: number;

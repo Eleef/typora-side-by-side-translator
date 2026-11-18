@@ -113,12 +113,12 @@ The default macOS plugin directory is:
 1. Open a saved local `.md` file in Typora.
 2. Open the community plugin settings, choose the interface and target languages, then configure `baseUrl`, `apiKey`, `model`, and `timeoutMs`.
 3. The API key is saved locally in plaintext plugin settings by default so it survives restarts and updates. Select **Do not save (current Typora session only)** when local-at-rest secrecy is more important than convenience.
-4. Open the community command panel. On the tested Mac with community core 2.10.86, press `F1` (or `Fn+F1`); the tested Windows setup uses `F2`. Check community hotkey settings if yours is different.
-5. Search for **Side-by-Side Translator** and run **Toggle Pane**.
+4. Click the **Bilingual** translation icon in the left community toolbar to show or hide the pane. The plugin remembers your last toggle.
+5. You can also run **Toggle Pane** in the community command panel. With the tested Mac core 2.10.86, press `F1` (or `Fn+F1`); the tested Windows setup uses `F2`.
 6. Run **Translate Current File** to create the selected language's cached translation.
-7. After editing the source, run **Refresh Stale Blocks** when you want changed blocks translated again.
+7. After editing the source, run **Refresh Stale Blocks** when you want changed blocks translated again. Translation reads the current editor content, including unsaved edits to a previously saved document.
 8. While a request is running, use **Cancel Translation** to stop it without replacing the existing cache.
-9. Run **Export Target File** to write a clean language-suffixed Markdown file beside the source file.
+9. Run **Export Target File** to write a clean language-suffixed Markdown file beside the source file. If the translation no longer matches the current source, refresh or retranslate before exporting.
 
 ## How It Works
 
@@ -154,7 +154,7 @@ The source language is detected by the configured model. The target is selected 
 
 The configured API provider receives the Markdown blocks selected for translation. Review that provider's data handling terms before using sensitive documents. The saved consent can be removed together with all local plugin data.
 
-Legacy or damaged caches are handled conservatively. Caches created before the current block identity format remain readable and exportable, but stale refresh will not overwrite them. If a cache or map is missing or unreadable, stale refresh stops before network requests and file writes. A full translation rebuild requires an explicit user command.
+After an interrupted save, the plugin restores a verified backup pair when available. If the remaining backups cannot be restored, the plugin leaves them untouched and asks you to back them up before clearing the cache. Older caches remain readable, but export requires a verifiable match to the current source and stale refresh cannot update a cache that uses an old block identity format.
 
 ## Current Limits
 

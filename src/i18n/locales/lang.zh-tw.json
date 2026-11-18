@@ -31,6 +31,7 @@
     "cancelTranslation": "取消翻譯"
   },
   "pane": {
+    "statusToggle": "雙語",
     "resizeHandle": "拖曳調整比例，按兩下恢復 50/50",
     "openToolbar": "開啟翻譯工具列",
     "moreActions": "更多",
@@ -125,7 +126,6 @@
     "manualBlocksPreserved": "已保留 {count} 個手動編輯的譯文區塊；對應原文已變更，因此仍標記為過期。",
     "translationCancelled": "翻譯工作已取消，現有快取未被覆寫。",
     "cancellingTranslation": "正在取消翻譯工作...",
-    "exportRequiresTranslation": "請先執行全文翻譯，目前沒有可匯出的快取譯文。",
     "confirmOverwriteExport": "目標資料夾已有同名譯文：\n{path}\n\n是否覆寫？",
     "exportCancelled": "已取消匯出，原資料夾中的現有譯文檔案已保留。",
     "exported": "譯文已匯出至 {path}",
@@ -133,6 +133,7 @@
     "persistedApiKeyInternalOnly": "已儲存的 API key 只能由外掛內部更新。"
   },
   "errors": {
+    "exportRequiresTranslation": "請先執行全文翻譯，目前沒有可匯出的快取譯文。",
     "invalidBaseUrl": "baseUrl 不是有效的網址。",
     "baseUrlCredentials": "baseUrl 不可包含使用者名稱或密碼。",
     "baseUrlQuery": "baseUrl 不可包含查詢參數或頁面片段。",
@@ -150,6 +151,8 @@
     "cacheLanguageMismatch": "快取目標語言與目前目標不一致，請重新選擇目標語言後再翻譯。",
     "cacheInvalidRefresh": "翻譯快取或對應檔案缺失、損壞或無法讀取。為保護現有譯文，已停止重新整理；請先匯出或備份快取，再執行「全文翻譯」。",
     "cacheInvalidExport": "翻譯快取或對應檔案缺失、損壞或無法讀取，已停止匯出。",
+    "cacheStaleExport": "譯文與目前原文不一致。請先更新譯文或重新全文翻譯，再匯出。",
+    "cacheRecoveryRequired": "無法還原上一次的譯文備份。請先備份剩餘的快取檔案，再清除快取並重新翻譯。",
     "cacheInvalid": "快取譯文與對應檔案不一致或已損壞。",
     "cacheLegacy": "快取使用舊版區塊識別演算法。為保護手動譯文，請執行「全文翻譯」明確重建快取。",
     "manualStructureConflict": "文件結構與手動編輯的譯文都已變更。為避免區塊錯配，已停止重新整理；請先匯出或備份譯文，再執行「全文翻譯」。",

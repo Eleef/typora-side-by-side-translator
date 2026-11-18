@@ -37,6 +37,10 @@ export class CacheMaintenanceService {
 
   public async clearAssociation(association: FileAssociation): Promise<void> {
     for (const targetPath of [
+      `${association.cacheTargetPath}.bak`,
+      `${association.cacheMapPath}.bak`,
+      `${association.cacheTargetPath}.tmp`,
+      `${association.cacheMapPath}.tmp`,
       association.cacheTargetPath,
       association.cacheMapPath,
       association.legacyCacheTargetPath,

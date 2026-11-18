@@ -31,6 +31,7 @@
     "cancelTranslation": "Cancel Translation"
   },
   "pane": {
+    "statusToggle": "Bilingual",
     "resizeHandle": "Drag to resize; double-click to restore 50/50",
     "openToolbar": "Open translation toolbar",
     "moreActions": "More",
@@ -125,7 +126,6 @@
     "manualBlocksPreserved": "Preserved {count} manually edited translation block(s). Their source changed, so they remain stale.",
     "translationCancelled": "The translation task was cancelled. The existing cache was not overwritten.",
     "cancellingTranslation": "Cancelling the translation task...",
-    "exportRequiresTranslation": "Run Translate All first; there is no cached translation to export.",
     "confirmOverwriteExport": "A translation with the same name already exists:\n{path}\n\nOverwrite it?",
     "exportCancelled": "Export cancelled. The existing translation file was kept.",
     "exported": "Translation exported to {path}",
@@ -133,6 +133,7 @@
     "persistedApiKeyInternalOnly": "The saved API key can only be changed internally by the plugin."
   },
   "errors": {
+    "exportRequiresTranslation": "Run Translate All first; there is no cached translation to export.",
     "invalidBaseUrl": "baseUrl is not a valid URL.",
     "baseUrlCredentials": "baseUrl must not contain a username or password.",
     "baseUrlQuery": "baseUrl must not contain query parameters or a page fragment.",
@@ -150,6 +151,8 @@
     "cacheLanguageMismatch": "The cache target language does not match the current target. Select the target language again before translating.",
     "cacheInvalidRefresh": "The translation cache or map is missing, damaged or unreadable. Stale refresh stopped to protect existing translations; export or back up the cache, then run Translate All.",
     "cacheInvalidExport": "The translation cache or map is missing, damaged or unreadable, so export was stopped.",
+    "cacheStaleExport": "The translation no longer matches the current document. Refresh or retranslate before exporting.",
+    "cacheRecoveryRequired": "The previous translation backup could not be restored. Back up the remaining cache files before clearing the cache and translating again.",
     "cacheInvalid": "The cached translation and map are inconsistent or damaged.",
     "cacheLegacy": "The cache uses an older block identity algorithm. Run Translate All explicitly to rebuild it while protecting manual translations.",
     "manualStructureConflict": "The document structure and manually edited translation both changed. Stale refresh stopped to avoid mismatching blocks; export or back up the translation, then run Translate All.",

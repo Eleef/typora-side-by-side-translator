@@ -31,6 +31,7 @@
     "cancelTranslation": "取消翻译"
   },
   "pane": {
+    "statusToggle": "双语",
     "resizeHandle": "拖拽调整比例，双击恢复 50/50",
     "openToolbar": "打开翻译工具栏",
     "moreActions": "更多",
@@ -125,7 +126,6 @@
     "manualBlocksPreserved": "已保留 {count} 个人工译文块；对应原文已变化，译文仍标记为过期。",
     "translationCancelled": "翻译任务已取消，现有缓存未被覆盖。",
     "cancellingTranslation": "正在取消翻译任务...",
-    "exportRequiresTranslation": "请先全文翻译，当前还没有缓存译文可导出。",
     "confirmOverwriteExport": "目标目录已存在同名译文：\n{path}\n\n是否覆盖？",
     "exportCancelled": "已取消导出，保留原目录中的现有译文文件。",
     "exported": "译文已导出到 {path}",
@@ -133,6 +133,7 @@
     "persistedApiKeyInternalOnly": "已保存的 API key 只能由插件内部更新。"
   },
   "errors": {
+    "exportRequiresTranslation": "请先全文翻译，当前还没有缓存译文可导出。",
     "invalidBaseUrl": "baseUrl 不是有效的网址。",
     "baseUrlCredentials": "baseUrl 不能包含用户名或密码。",
     "baseUrlQuery": "baseUrl 不能包含查询参数或页面锚点。",
@@ -150,6 +151,8 @@
     "cacheLanguageMismatch": "缓存目标语言与当前目标不一致，请重新选择目标语言后再翻译。",
     "cacheInvalidRefresh": "翻译缓存或映射文件缺失、损坏或不可读。为保护现有译文，已停止刷新脏区；请先导出或备份缓存，再执行“全文翻译”。",
     "cacheInvalidExport": "翻译缓存或映射文件缺失、损坏或不可读，已停止导出。",
+    "cacheStaleExport": "译文与当前原文不一致。请先更新译文或重新全文翻译，再导出。",
+    "cacheRecoveryRequired": "无法恢复上一次的译文备份。请先备份剩余的缓存文件，再清理缓存并重新翻译。",
     "cacheInvalid": "缓存译文与映射文件不一致或已损坏。",
     "cacheLegacy": "缓存使用旧版块标识算法。为保护人工译文，请执行“全文翻译”显式重建缓存。",
     "manualStructureConflict": "文档结构和人工改写译文均已变化。为避免块错配，已停止刷新脏区；请先导出或备份译文，再执行“全文翻译”。",

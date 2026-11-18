@@ -187,7 +187,7 @@ test("translation pane exposes one state-driven primary action without duplicate
     cachedDetail: "{cacheName}"
   };
   const localizer = {
-    t: { pane: paneText },
+    t: { pane: paneText, errors: { cacheStaleExport: "Refresh before exporting" } },
     format: (template: string, values: Record<string, string | number> = {}) =>
       template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? "")),
     targetLanguageLabel: (language: string) => language,
@@ -236,6 +236,10 @@ test("translation pane exposes one state-driven primary action without duplicate
 
     controller.render({ ...baseState, targetMarkdown: "Translated", staleCount: 3 });
     assert.equal(primary()?.textContent, "Update 3");
+    const exportButton = dom.window.document.querySelector<HTMLButtonElement>('[data-action="export-target"]');
+    assert.equal(exportButton?.disabled, true);
+    exportButton?.click();
+    assert.equal(invoked.export, 0);
     assert.equal(
       dom.window.document.querySelector<HTMLButtonElement>('[data-action="translate-all"]')?.classList.contains("is-hidden"),
       false

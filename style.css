@@ -555,3 +555,28 @@
 .typora-bilingual-pane__overlay[data-toolbar-mode="compact"] .typora-bilingual-pane__language-cascade {
   display: none;
 }
+
+.typora-bilingual-ribbon-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.typora-bilingual-ribbon-toggle:hover,
+.typora-bilingual-ribbon-toggle[aria-pressed="true"] {
+  background: var(--active-file-bg-color, rgba(127, 127, 127, 0.16));
+  color: var(--active-file-text-color, inherit);
+}
+
+.typora-bilingual-ribbon-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}

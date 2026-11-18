@@ -31,6 +31,7 @@
     "cancelTranslation": "翻訳をキャンセル"
   },
   "pane": {
+    "statusToggle": "対訳",
     "resizeHandle": "ドラッグで幅を変更、ダブルクリックで 50/50 に戻す",
     "openToolbar": "翻訳ツールバーを開く",
     "moreActions": "その他",
@@ -125,7 +126,6 @@
     "manualBlocksPreserved": "手動編集された翻訳ブロックを {count} 個保持しました。対応する原文が変わったため、古い状態のままです。",
     "translationCancelled": "翻訳処理をキャンセルしました。既存のキャッシュは上書きされていません。",
     "cancellingTranslation": "翻訳処理をキャンセル中...",
-    "exportRequiresTranslation": "先に「全文を翻訳」を実行してください。エクスポートできるキャッシュ翻訳がありません。",
     "confirmOverwriteExport": "同名の翻訳ファイルがすでにあります：\n{path}\n\n上書きしますか？",
     "exportCancelled": "エクスポートをキャンセルし、既存の翻訳ファイルを保持しました。",
     "exported": "翻訳を {path} にエクスポートしました",
@@ -133,6 +133,7 @@
     "persistedApiKeyInternalOnly": "保存済みの API key はプラグイン内部からのみ変更できます。"
   },
   "errors": {
+    "exportRequiresTranslation": "先に「全文を翻訳」を実行してください。エクスポートできるキャッシュ翻訳がありません。",
     "invalidBaseUrl": "baseUrl は有効な URL ではありません。",
     "baseUrlCredentials": "baseUrl にユーザー名やパスワードを含めることはできません。",
     "baseUrlQuery": "baseUrl にクエリパラメーターやページフラグメントを含めることはできません。",
@@ -150,6 +151,8 @@
     "cacheLanguageMismatch": "キャッシュの翻訳先言語が現在の設定と一致しません。翻訳先言語を選び直してから翻訳してください。",
     "cacheInvalidRefresh": "翻訳キャッシュまたはマップが見つからない、破損している、または読み取れません。既存の翻訳を保護するため更新を停止しました。キャッシュをエクスポートまたはバックアップしてから「全文を翻訳」を実行してください。",
     "cacheInvalidExport": "翻訳キャッシュまたはマップが見つからない、破損している、または読み取れないため、エクスポートを停止しました。",
+    "cacheStaleExport": "訳文が現在の原文と一致しません。訳文を更新するか、全文を翻訳し直してからエクスポートしてください。",
+    "cacheRecoveryRequired": "前回の翻訳バックアップを復元できませんでした。残っているキャッシュをバックアップしてから、キャッシュを削除して翻訳し直してください。",
     "cacheInvalid": "キャッシュ翻訳とマップが一致しないか破損しています。",
     "cacheLegacy": "キャッシュは古いブロック識別方式を使用しています。手動翻訳を保護するため「全文を翻訳」で明示的に再構築してください。",
     "manualStructureConflict": "文書構造と手動編集された翻訳の両方が変更されています。ブロックの不一致を防ぐため更新を停止しました。翻訳をエクスポートまたはバックアップしてから「全文を翻訳」を実行してください。",

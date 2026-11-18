@@ -28,7 +28,7 @@ npm run check
 - `build/typora-side-by-side-translator/manifest.json` 存在
 - `build/typora-side-by-side-translator/style.css` 存在
 - 严格类型检查通过
-- 运行时安全、凭据策略迁移、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过，共 67 项
+- 运行时安全、凭据策略迁移、界面语言、目标语言隔离、增量翻译、Markdown/导出、HTML 净化、pane 卸载、缓存一致性、任务取消、版本、发布和仓库/安装规则测试全部通过
 - 连续两次生成的 `release/plugin.zip` SHA-256 完全一致
 
 版本候选验证：
@@ -129,11 +129,12 @@ bash ./scripts/doctor-macos.sh --redact-paths
 ### 1. Pane 开关
 
 1. 打开 `fixtures/fixture-basic.md`
-2. 执行 `Typora Side-by-Side Translator: Toggle Pane`
+2. 点击左侧社区工具栏的「双语」翻译图标；也可以执行 `Typora Side-by-Side Translator: Toggle Pane`
 
 期望：
 
 - 右侧 pane 出现
+- 工具栏开关与命令切换的是同一个面板；重启后恢复最后一次手动开关状态，不自动请求翻译服务
 - 工具栏与状态提示显示为右上角悬浮层，不占正文顶部高度
 - 原文首块与译文首块从同一垂直起点开始
 - 右侧没有独立滚动条
@@ -200,6 +201,7 @@ bash ./scripts/doctor-macos.sh --redact-paths
 - 原文目录下生成当前目标语言对应的 `.zh.md`、`.zh-TW.md`、`.en.md`、`.ja.md` 或 `.ko.md`
 - 导出的 Markdown 中不包含 `typora-side-by-side:block-*` 或旧版 `typora-bilingual:block-*` 注释
 - 标题、列表、引用、代码块、公式、表格结构可正常阅读
+- 插入、删减、移动或修改原文块（包括未保存的修改）后，右栏禁用导出，命令导出也拒绝写盘；更新译文后可再次导出
 
 ### 4. 脏区刷新
 
@@ -346,6 +348,7 @@ bash ./scripts/doctor-macos.sh --redact-paths
 - 新 map 使用 `schemaVersion: 4`、`translatedHashAlgorithm: sha256`、`blockIdAlgorithm: position-v1` 和 `cacheGeneration`
 - 缓存译文头与 map 的 `cacheGeneration` 相同，块 ID 集合与数量一致
 - 缓存对先写临时文件再替换，第二个文件提交失败时恢复上一对正式文件
+- 下次读取时可从完整备份或能与正式文件配对的单份备份恢复；新写入失败时保留尚可恢复的旧缓存，无法匹配的备份不会被覆写
 - 每个 `translatedHash` 是 64 位十六进制摘要
 - 人工修改标记仍可正确识别
 - schema 2 摘要不会被重复哈希
