@@ -1,3 +1,7 @@
+---
+description: "Install and use the side-by-side Markdown translation plugin for Typora on Windows or macOS."
+---
+
 # Typora Side-by-Side Translator
 
 Edit the original Markdown in Typora while reading a generated Chinese, English, Japanese, or Korean translation beside it.
@@ -8,7 +12,7 @@ Edit the original Markdown in Typora while reading a generated Chinese, English,
 
 _Live capture from Typora 1.14.9 on Windows: source editing remains native on the left, while the cached read-only translation stays beside it._
 
-> **Alpha:** the core workflow is verified on Windows. macOS packaging, installation and diagnostics are automated candidates, but the plugin has not completed a real Typora-on-macOS smoke test. The plugin is not yet available in the community marketplace.
+> **Alpha:** the core workflow is verified on Windows. Installation and side-by-side use have been smoke-tested on Apple Silicon. The plugin is not yet available in the community marketplace.
 
 Current development version: **`0.1.0-alpha.3`**. The installed version is also shown at the top of the plugin settings page.
 
@@ -30,16 +34,16 @@ Current development version: **`0.1.0-alpha.3`**. The installed version is also 
 | Platform | Status | Current evidence |
 |---|---|---|
 | Windows 10/11 | Supported Alpha | Typora 1.14.9 + `typora-community-plugin` 2.9.14 real-host smoke |
-| macOS | Candidate, unverified in Typora | `darwin` package contract and macOS installer/doctor; CI gate defined, remote run pending |
+| macOS | Apple Silicon smoke-tested | Typora 1.14.15 + `typora-community-plugin` 2.10.86 on macOS 27.0.1 |
 | Linux | Unsupported | No installer or host smoke |
 
 The manifest minimums are Typora `1.12.4` and community core `2.5.28`; these are installation thresholds, not evidence that every newer host combination is verified. Source installation uses Node.js 24.
 
 ### Install a Published Alpha Release
 
-Install `typora-community-plugin` first. Open the [Releases page](https://github.com/Eleef/typora-side-by-side-translator/releases), select an available release, and download the assets for your platform from the same version into one directory. The repository may be ahead of the latest published Alpha; use the source-install path below when validating the current development version.
+Open the [Releases page](https://github.com/Eleef/typora-side-by-side-translator/releases) and download the assets for your platform from the same version into one directory. Windows requires `typora-community-plugin` to be installed first. If a release predates the one-command macOS installer, use the source-install path below.
 
-The macOS assets below start with the next release that contains this candidate work; older Alpha releases contain only the Windows pair.
+Older Alpha releases contain only the Windows scripts.
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
@@ -62,21 +66,20 @@ The installer checks the community loader, verifies the ZIP checksum and package
 
 Before upgrading an existing installation, check the API-key storage mode in plugin settings. A session-only key cannot survive closing Typora, so the installer stops and asks you to select **Save locally (plaintext, default)** first. If re-entering the key after installation is acceptable, explicitly append `-AcceptSessionCredentialLoss`. The installer verifies that persisted plugin settings are byte-for-byte unchanged by the upgrade.
 
-#### macOS Candidate
+#### macOS
 
-Install the official community loader first. Its macOS installer requires Terminal permission under **System Settings → Privacy & Security → App Management** because it injects the loader into `Typora.app`. Completely close Typora, then run:
+Completely quit Typora (`Cmd+Q`), then run:
 
 ```bash
 checksum=$(awk '$2 == "plugin.zip" { print $1 }' SHA256SUMS.txt)
-chmod +x install-plugin-macos.sh doctor-macos.sh
-./install-plugin-macos.sh --package ./plugin.zip --expected-sha256 "$checksum"
+bash ./install-plugin-macos.sh --with-community --package ./plugin.zip --expected-sha256 "$checksum"
 ```
 
-The same `plugin.zip` is used on Intel and Apple Silicon; the plugin contains JavaScript and no native CPU-specific module. The installer uses Typora's actual macOS user-data plugin directory, verifies the package and community loader, enables the plugin, preserves persistent settings, and runs the macOS doctor. This path remains **unverified in a real Typora-on-macOS session**.
+Reopen Typora after installation. `--with-community` reuses a working loader or downloads a pinned, SHA-256-verified official community release. On a fresh installation or after a Typora update, the [official installer](https://github.com/typora-community-plugin/typora-community-plugin/blob/2.10.86/packages/installer/README.md#macos) modifies the app HTML. If macOS blocks that write, grant your terminal **System Settings → Privacy & Security → App Management** permission and rerun. The script backs up the original HTML, enables the translator, and preserves existing plugin settings. It does not re-sign the modified app. Intel uses the same JavaScript package but has not been host-tested.
 
 ### Install From Source
 
-Install `typora-community-plugin` first, completely close Typora, and then use the matching platform commands.
+Completely quit Typora before installing. On Windows, install `typora-community-plugin` first.
 
 Windows:
 
@@ -93,13 +96,10 @@ The installer verifies that the community marketplace loader is present, copies 
 %USERPROFILE%\.typora\community-plugins\plugins\eleef.typora-side-by-side-translator
 ```
 
-macOS candidate:
+macOS (Node.js 24 or newer):
 
 ```bash
-npm ci
-npm run ci
-./scripts/doctor-macos.sh --mode Community
-./scripts/install-plugin-macos.sh
+npm run install:macos
 ```
 
 The default macOS plugin directory is:
@@ -113,7 +113,7 @@ The default macOS plugin directory is:
 1. Open a saved local `.md` file in Typora.
 2. Open the community plugin settings, choose the interface and target languages, then configure `baseUrl`, `apiKey`, `model`, and `timeoutMs`.
 3. The API key is saved locally in plaintext plugin settings by default so it survives restarts and updates. Select **Do not save (current Typora session only)** when local-at-rest secrecy is more important than convenience.
-4. Open the community command panel. In the verified setup the shortcut is `F2`.
+4. Open the community command panel. On the tested Mac with community core 2.10.86, press `F1` (or `Fn+F1`); the tested Windows setup uses `F2`. Check community hotkey settings if yours is different.
 5. Search for **Side-by-Side Translator** and run **Toggle Pane**.
 6. Run **Translate Current File** to create the selected language's cached translation.
 7. After editing the source, run **Refresh Stale Blocks** when you want changed blocks translated again.
@@ -147,7 +147,7 @@ The source language is detected by the configured model. The target is selected 
 - Local plugin settings are the default and store the API key as plaintext in the current user's community plugin data; other programs running as the same operating-system user can read it. The optional session mode keeps the key only in memory and cannot recover it after closing, restarting, or updating Typora.
 - Changing the API service origin clears both the in-memory and saved key. Switching back to session mode or using the explicit delete action also removes the saved value.
 - Reinstalling or uninstalling plugin code does not remove community settings, caches, or logs. The upgrade installer verifies that persisted settings are unchanged; a session-only key still disappears when Typora closes. Use **Erase all local plugin data** in the plugin settings before uninstalling when local data must be removed.
-- Translation cache is stored below the community plugin settings data directory: `%USERPROFILE%\.typora\community-plugins\settings\data\...` on the verified Windows layout, or `~/Library/Application Support/abnerworks.Typora/plugins/settings/data/...` on the macOS candidate layout.
+- Translation cache is stored below the community plugin settings data directory: `%USERPROFILE%\.typora\community-plugins\settings\data\...` on Windows, or `~/Library/Application Support/abnerworks.Typora/plugins/settings/data/...` on macOS.
 - **Clear current document** removes only the active target language's cache pair. The settings page can also clear all translation caches, diagnostic logs, or all plugin-local data; exported Markdown files are never deleted.
 - Diagnostic logs redact credentials, local paths, URL query parameters, and sensitive error details.
 - The read-only pane escapes raw Markdown HTML and sanitizes rendered output with a strict allowlist; executable markup and external resource elements are removed.
@@ -161,7 +161,7 @@ Legacy or damaged caches are handled conservatively. Caches created before the c
 - Saved local `.md` files only; untitled and remote documents are unsupported.
 - Source-language selection and automatic target-language routing are not provided; source detection is delegated to the configured model.
 - The right pane is read-only and translation is not performed on every keystroke.
-- Windows is the supported Alpha platform. macOS is a code/install candidate whose real Typora UI and runtime behavior remain unverified.
+- The macOS smoke covers installation and side-by-side use on one Apple Silicon setup, not every scenario in the Windows verification matrix.
 - Alpha installation is available from GitHub Releases; community marketplace installation is planned after the stable `0.1.0` release.
 
 ## Troubleshooting
@@ -175,10 +175,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 On macOS:
 
 ```bash
-./scripts/doctor-macos.sh --redact-paths
+bash ./scripts/doctor-macos.sh --redact-paths
 ```
 
-Typora updates may replace the application HTML modified by `typora-community-plugin`, making the marketplace and all community plugins disappear. If the doctor reports a failed `community-market.injection` check, close Typora and reinstall the current official community loader against the updated Typora installation. Do not restore an old Typora HTML file over the new version.
+Typora updates may replace the modified HTML, hiding all community plugins. If the doctor reports a `community-market.injection` failure, quit Typora and rerun the one-command installer to reattach the existing loader. Do not restore HTML from an older Typora version over the new version.
 
 When reporting a problem, rerun the doctor with `-RedactPaths`, then use the repository's Bug or Compatibility issue form and include that redacted summary, Typora version, community core version, and reproduction steps. Do not include API keys or unredacted logs.
 

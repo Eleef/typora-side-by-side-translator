@@ -1,6 +1,10 @@
+---
+description: "Development setup, local installation, compatibility reporting, and release validation for the Typora plugin."
+---
+
 # Contributing
 
-Thanks for helping improve Typora Side-by-Side Translator. Windows is the currently verified host platform. macOS is an installation and packaging candidate whose real Typora runtime behavior is still unverified, so every compatibility claim needs reproducible evidence.
+Thanks for helping improve Typora Side-by-Side Translator. See [VERIFICATION.md](./VERIFICATION.md) for the exact Windows and Apple Silicon host combinations tested and the remaining compatibility checks.
 
 ## Before You Start
 
@@ -15,8 +19,8 @@ Requirements:
 
 - Node.js 24
 - npm
-- Windows 10/11 for the verified host smoke, or macOS for candidate installer testing
-- Typora 1.14.9 and typora-community-plugin 2.9.14 for the currently verified host smoke
+- Windows or macOS for the corresponding installer tests
+- A Typora and community core combination from [VERIFICATION.md](./VERIFICATION.md) for reproducing a host smoke test
 
 The manifest still declares Typora `1.12.4` and community core `2.5.28` as installation minimums. Do not describe that minimum pair as verified until it has completed the same host smoke.
 
@@ -42,11 +46,10 @@ Windows:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 ```
 
-macOS candidate:
+macOS:
 
 ```bash
-./scripts/doctor-macos.sh --mode Community
-./scripts/install-plugin-macos.sh
+npm run install:macos
 ```
 
 Fully exit Typora before installation and reopen it afterward. Follow [VERIFICATION.md](./VERIFICATION.md) for the platform evidence matrix and host smoke testing. A passing macOS installer test is not evidence that the plugin UI works in Typora on macOS.
@@ -72,7 +75,7 @@ $env:RELEASE_TAG = "<version>"
 npm run check:release
 ```
 
-`version:set` updates `package.json`, `package-lock.json`, and `manifest.json` together. Version tags do not use a `v` prefix, and an existing release version must never be overwritten. A release uploads the shared `plugin.zip`, `SHA256SUMS.txt`, both Windows scripts, and both macOS scripts. The ZIP contains `manifest.json`, `main.js`, `style.css`, and the file-based interface translations under `locales/`; package, installer, and published-release checks validate the complete list. The release workflow must pass the macOS installer job before publishing, but release notes must continue to call macOS a candidate until a real-host smoke is recorded. After publishing, run `npm run check:published -- --version <version>`.
+`version:set` updates `package.json`, `package-lock.json`, and `manifest.json` together. Version tags do not use a `v` prefix, and an existing release version must never be overwritten. A release uploads the shared `plugin.zip`, `SHA256SUMS.txt`, both Windows scripts, and both macOS scripts. The ZIP contains `manifest.json`, `main.js`, `style.css`, and the file-based interface translations under `locales/`; package, installer, and published-release checks validate the complete list. The release workflow must pass the macOS installer job before publishing. Release notes must distinguish the one tested Apple Silicon setup from broader compatibility. After publishing, run `npm run check:published -- --version <version>`.
 
 ## Security Reports
 

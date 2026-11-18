@@ -19,6 +19,7 @@
   },
   "scripts": {
     "build": "rollup -c",
+    "install:macos": "npm ci && npm run build && bash ./scripts/install-plugin-macos.sh --with-community",
     "clean": "node scripts/clean.js",
     "check:repo": "node scripts/check-repository.js",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",

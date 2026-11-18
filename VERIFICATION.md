@@ -1,3 +1,7 @@
+---
+description: "记录 Windows 与 macOS 的安装、打包和真机验证证据，以及逐项复测步骤。"
+---
+
 # MVP Verification
 
 ## 环境
@@ -5,7 +9,7 @@
 | 平台 | 证据状态 | 环境或边界 |
 |---|---|---|
 | Windows 10/11 | VERIFIED | Typora 1.14.9 + typora-community-plugin 2.9.14；已完成安装、加载、pane 和迁移 smoke |
-| macOS | UNVERIFIED in Typora | `darwin` 清单、架构无关 ZIP、Mac 安装器/doctor 和 macOS CI 隔离测试已定义；没有真实 Typora-on-macOS 运行证据 |
+| macOS | APPLE SILICON SMOKE | macOS 27.0.1 + Typora 1.14.15 + typora-community-plugin 2.10.86；验证安装、加载、重启、译文面板与双语并排使用 |
 | Linux | Unsupported | 未声明平台，未提供安装器和宿主 smoke |
 
 ## 构建验证
@@ -60,7 +64,7 @@ macOS 安装器回归：
 npm run test:macos-installer
 ```
 
-该测试在 GitHub 的 macOS runner 上构造隔离的 `Typora.app` 和社区运行目录，验证官方加载器注入形态、同一 `plugin.zip` 安装、`darwin` 清单、自动启用、持久设置哈希不变、会话密钥升级阻止及损坏安装检测。它不启动 Typora 图形界面，因此结果不能标记为 macOS 宿主 smoke。
+该测试构造隔离的 `Typora.app` 和社区运行目录，验证官方加载器的首次安装与更新后重新接入、原 HTML 备份、社区配置保留、同一 `plugin.zip` 安装、自动启用、持久设置保留、会话密钥升级阻止及损坏安装检测。首次安装与重新接入测试需要下载固定版本的社区发布包。测试不启动 Typora 图形界面。
 
 ## 安装验证
 
@@ -94,15 +98,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 - 命令面板显示新名称下的 5 个命令；命令标题使用当前插件界面语言
 - 旧设置、缓存、主日志和轮转日志迁移到新插件 ID；旧设置文件中的 `apiKey` 被清空
 
-### macOS 候选
+### macOS
 
-先按社区框架官方说明运行 `install-macos.sh`，然后完全退出 Typora：
+完全退出 Typora，从源码执行：
 
 ```bash
-./scripts/doctor-macos.sh --mode Community
-checksum=$(awk '$2 == "plugin.zip" { print $1 }' release/SHA256SUMS.txt)
-./scripts/install-plugin-macos.sh --package ./release/plugin.zip --expected-sha256 "$checksum"
-./scripts/doctor-macos.sh --redact-paths
+npm run install:macos
+open -a Typora fixtures/fixture-basic.md
+bash ./scripts/doctor-macos.sh --redact-paths
 ```
 
 自动化期望：
@@ -115,14 +118,11 @@ checksum=$(awk '$2 == "plugin.zip" { print $1 }' release/SHA256SUMS.txt)
 - 会话模式 key 存在丢失风险时，默认在替换代码前停止
 - doctor 可以识别加载器注入、Core、插件文件、最低版本、启用状态和启动日志标记
 
-真实 Mac 后续仍需确认：
+2026-11-18 的 Apple Silicon 实测：按社区官方安装脚本安装加载器后成功启动 Typora，用户确认双语功能可正常使用。一键入口在隔离目录验证首次安装和修复，并在本机验证覆盖安装保留设置、重启后重新写出初始化完成日志，健康检查零失败。命令面板快捷键为 `F1`（或 `Fn+F1`）；打开译文面板后可在右栏点击全文翻译。
 
-- Installed Plugins 中可见并能启用插件
-- 命令面板显示全部命令
-- pane、悬停菜单、分隔条、共享滚动和多语言布局正常
-- 全文翻译、增量刷新、取消、缓存和导出正常
-- 重启后设置按所选凭据模式恢复
-- Intel 与 Apple Silicon 至少各收集一份兼容报告；这不是当前候选代码完成的前置条件
+排查时区分「磁盘安装完成」和「Typora 实际完成初始化」。社区 Core 2.10.86 的 [Mac 文件适配器](https://github.com/typora-community-plugin/typora-community-plugin/blob/2.10.86/packages/core/src/io/fs/fs.darwin.ts) 把待追加日志当成文件名交给 `cat`；应用能工作，但日志仍为空。本插件在 macOS 改为读取后写回，诊断以 `initial refresh complete` 确认完成初始化。复测时确认日志行来自本次启动；旧日志不证明本次启动成功。
+
+尚未逐项验收 Intel、其他 Typora/Core 版本，以及 Mac 上的增量刷新、取消、缓存、导出和凭据迁移矩阵。
 
 ## Smoke 场景
 
@@ -374,4 +374,4 @@ checksum=$(awk '$2 == "plugin.zip" { print $1 }' release/SHA256SUMS.txt)
 - 当前右栏渲染使用 `markdown-it`，视觉上不会完全等同 Typora 原生渲染
 - 当前右栏缓存文件保留内部控制注释，仅导出文件为纯净 Markdown
 - 当前 Typora 社区插件宿主没有可用的系统安全凭据桥；默认跨重启保存依赖明文插件设置，设置页必须明确披露风险并提供会话模式
-- macOS 平台声明基于社区框架公开契约和自动化安装测试；没有真实 Mac 宿主证据前，不得在 Release 或市场文案中称为正式支持
+- macOS 仅对上表真机组合做了基本验证；其他版本和 Intel 不应写成已验收

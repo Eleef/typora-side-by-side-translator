@@ -70,11 +70,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            channel="Windows-tested prerelease with macOS candidate support"
+            channel="Windows-tested prerelease with an Apple Silicon smoke test"
           else
-            channel="Windows-tested release with macOS candidate support"
+            channel="Windows-tested release with an Apple Silicon smoke test"
           fi
-          notes="${channel}. macOS packaging and installer checks run on macOS CI, but the plugin has not completed a real Typora-on-macOS smoke test. Requires Typora with typora-community-plugin. Translation requests are sent only after explicit consent and a translate command. API keys are stored in plaintext local plugin settings by default; session-only storage remains available. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
+          notes="${channel}. See VERIFICATION.md for the tested host versions and scope. Requires Typora with typora-community-plugin; the macOS installer can set up the community loader. Translation requests are sent only after explicit consent and a translate command. API keys are stored in plaintext local plugin settings by default; session-only storage remains available. See README and SECURITY.md for installation, privacy boundaries, local-data cleanup, and known limits."
           args=(--verify-tag --title "${GITHUB_REF_NAME}" --generate-notes --notes "${notes}")
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             args+=(--prerelease)

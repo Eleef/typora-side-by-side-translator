@@ -103,6 +103,34 @@ if /bin/bash "$workspace/scripts/doctor-macos.sh" \
 fi
 /bin/cp "$sandbox/lang.en.json" "$plugin_root/locales/lang.en.json"
 
+bootstrap_home="$sandbox/home"
+bootstrap_app="$sandbox/Bootstrap Typora.app"
+bootstrap_community="$bootstrap_home/Library/Application Support/abnerworks.Typora/plugins"
+bootstrap_entry="$bootstrap_app/Contents/Resources/TypeMark/index.html"
+/bin/mkdir "$bootstrap_home"
+/usr/bin/ditto "$typora_home" "$bootstrap_app"
+printf '%s\n' '<html><body>Original Typora entry</body></html>' > "$sandbox/original.html"
+/bin/cp "$sandbox/original.html" "$bootstrap_entry"
+
+HOME="$bootstrap_home" /bin/bash "$workspace/scripts/install-plugin-macos.sh" \
+  --path "$bootstrap_app" --with-community \
+  --package "$workspace/release/plugin.zip" --expected-sha256 "$package_hash"
+
+test -s "$bootstrap_community/plugins/$plugin_id/main.js"
+/usr/bin/grep -Fq "file://$bootstrap_home/Library/Application%20Support/abnerworks.Typora/plugins/loader.js" "$bootstrap_entry"
+backups=("${bootstrap_community%/plugins}"/community-loader-backups/install.*/index.html)
+/usr/bin/cmp "$sandbox/original.html" "${backups[0]}"
+
+printf '%s\n' '{"another.plugin":true,"eleef.typora-side-by-side-translator":true}' > "$bootstrap_community/settings/plugins.json"
+/bin/cp "$bootstrap_community/loader.json" "$sandbox/loader.json"
+/bin/cp "$sandbox/original.html" "$bootstrap_entry"
+HOME="$bootstrap_home" /bin/bash "$workspace/scripts/install-plugin-macos.sh" \
+  --path "$bootstrap_app" --with-community
+
+/usr/bin/grep -Fq 'plugins/loader.js' "$bootstrap_entry"
+/usr/bin/cmp "$sandbox/loader.json" "$bootstrap_community/loader.json"
+/usr/bin/grep -Eq '"another\.plugin"[[:space:]]*:[[:space:]]*true' "$bootstrap_community/settings/plugins.json"
+
 printf 'macos_installer_smoke=passed\n'
 printf 'macos_zip_installer_smoke=passed\n'
 printf 'macos_session_credential_guard=passed\n'
@@ -110,3 +138,4 @@ printf 'macos_persisted_settings_preservation=passed\n'
 printf 'macos_settings_only_reinstall=passed\n'
 printf 'macos_legacy_plugin_migration=passed\n'
 printf 'macos_damaged_install_detection=passed\n'
+printf 'macos_community_bootstrap_and_repair=passed\n'

@@ -182,10 +182,19 @@ export class PluginDiagnostics {
     }
 
     try {
-      const payloadBytes = new TextEncoder().encode(`${payload}\n`).byteLength;
+      const encoder = new TextEncoder();
+      const payloadBytes = encoder.encode(`${payload}\n`).byteLength;
       await this.rotateIfNeeded(payloadBytes);
-      await fs.appendText(this.logPath, `${payload}\n`);
-      this.currentLogBytes += payloadBytes;
+      if (this.app.platform === "darwin") {
+        const previous = (await fs.readText(this.logPath)) || "";
+        const separator = previous && !previous.endsWith("\n") ? "\n" : "";
+        const content = `${previous}${separator}${payload}`;
+        await fs.writeText(this.logPath, content);
+        this.currentLogBytes = encoder.encode(`${content}\n`).byteLength;
+      } else {
+        await fs.appendText(this.logPath, `${payload}\n`);
+        this.currentLogBytes += payloadBytes;
+      }
     } catch (error) {
       console.error("[typora-side-by-side] failed to write diagnostic log", error);
     }

@@ -268,12 +268,11 @@ if [[ "$mode" == "Installed" ]]; then
   fi
 
   runtime_log_path="$community_root/settings/data/logs/typora-side-by-side-translator.log"
-  if [[ -s "$runtime_log_path" ]] && /usr/bin/grep -Fq "\"manifestId\":\"$plugin_id\"" "$runtime_log_path"; then
-    add_pass "plugin.runtime-marker" "A successful plugin startup marker exists in the diagnostic log."
+  if [[ -s "$runtime_log_path" ]] && /usr/bin/grep -Fq '[INFO] initial refresh complete' "$runtime_log_path"; then
+    add_pass "plugin.runtime-marker" "A completed plugin initialization is recorded in the diagnostic log."
   else
     add_warning "plugin.runtime-marker" "No macOS startup marker exists yet. Restart Typora and open the plugin once before claiming host verification."
   fi
-  add_warning "plugin.verified-matrix" "The macOS installer and package are automated candidates; a real Typora-on-macOS smoke test has not been completed."
 fi
 
 if /usr/bin/pgrep -x Typora >/dev/null 2>&1; then

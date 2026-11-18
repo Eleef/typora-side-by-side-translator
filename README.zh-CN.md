@@ -1,3 +1,7 @@
+---
+description: "介绍如何在 Windows 和 macOS 的 Typora 中安装并使用 Markdown 并排翻译插件。"
+---
+
 # Typora Side-by-Side Translator
 
 在 Typora 中编辑原始 Markdown，同时在旁边阅读生成的中文、英文、日文或韩文译文。
@@ -8,7 +12,7 @@
 
 _Windows 上 Typora 1.14.9 的实拍界面：左侧保持原生编辑，右侧并排显示缓存的只读译文。_
 
-> **Alpha 阶段：**核心流程已在 Windows 真机验证。macOS 的打包、安装和诊断已具备自动化候选，但尚未完成真实 Typora on macOS 验证。插件还未进入社区插件市场。
+> **Alpha 阶段：**核心流程已在 Windows 真机验证；Mac 已在 Apple Silicon 真机验证安装与双语并排使用。插件还未进入社区插件市场。
 
 当前开发版本：**`0.1.0-alpha.3`**。插件设置页顶部也会显示实际安装版本。
 
@@ -30,16 +34,16 @@ _Windows 上 Typora 1.14.9 的实拍界面：左侧保持原生编辑，右侧�
 | 平台 | 状态 | 当前证据 |
 |---|---|---|
 | Windows 10/11 | Alpha 支持 | Typora 1.14.9 + `typora-community-plugin` 2.9.14 真机 smoke |
-| macOS | 候选，尚未真机验证 | `darwin` 清单和 Mac 安装/诊断脚本；CI 门禁已定义，远端运行待验证 |
+| macOS | Apple Silicon 真机基本验证 | macOS 27.0.1 + Typora 1.14.15 + `typora-community-plugin` 2.10.86 |
 | Linux | 不支持 | 尚无安装器和宿主验证 |
 
 Manifest 最低门槛为 Typora `1.12.4` 和社区核心 `2.5.28`；它们只是安装门槛，不代表所有更高版本组合均已验证。源码安装使用 Node.js 24。
 
 ### 安装已发布的 Alpha 包
 
-先安装 `typora-community-plugin`，打开 [Releases 页面](https://github.com/Eleef/typora-side-by-side-translator/releases)，选择一个已发布版本，并从同一版本下载对应平台需要的文件。仓库源码可能领先于最近发布的 Alpha；验证当前开发版本时请使用下方“从源码安装”。
+打开 [Releases 页面](https://github.com/Eleef/typora-side-by-side-translator/releases)，从同一版本下载对应平台需要的文件。Windows 需要先安装 `typora-community-plugin`。若发布版本尚未包含 Mac 一键安装，请按下方“从源码安装”操作。
 
-macOS 资产会从包含本轮候选代码的下一次 Release 开始提供；更早的 Alpha Release 只有 Windows 脚本。
+早期 Alpha Release 只有 Windows 脚本。
 
 - `plugin.zip`
 - `SHA256SUMS.txt`
@@ -62,21 +66,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-plugin.ps1 -Packag
 
 升级已有安装前，请先在插件设置中检查 API key 保存方式。新版默认使用“本地保存（明文，默认）”，覆盖安装会保留该设置。若主动选择“不保存（仅当前 Typora 会话）”，关闭 Typora 后 key 无法恢复，安装器会停止并提示先切回本地保存；若接受安装后重新输入，可在安装命令末尾显式增加 `-AcceptSessionCredentialLoss`。安装器会校验持久化设置文件在升级前后完全不变。
 
-#### macOS 候选
+#### macOS
 
-先使用社区框架官方脚本安装加载器。该脚本需要在 macOS「系统设置 → 隐私与安全性 → App 管理」中允许 Terminal 修改应用，因为它要向 `Typora.app` 注入加载器。完全退出 Typora 后执行：
+先用 `Cmd+Q` 完全退出 Typora，再执行：
 
 ```bash
 checksum=$(awk '$2 == "plugin.zip" { print $1 }' SHA256SUMS.txt)
-chmod +x install-plugin-macos.sh doctor-macos.sh
-./install-plugin-macos.sh --package ./plugin.zip --expected-sha256 "$checksum"
+bash ./install-plugin-macos.sh --with-community --package ./plugin.zip --expected-sha256 "$checksum"
 ```
 
-Intel 与 Apple Silicon 使用同一份 `plugin.zip`；插件是 JavaScript，不含按 CPU 架构编译的原生模块。安装器会使用 Typora 实际的 macOS 用户数据目录，检查社区加载器和安装包、启用插件、保留持久设置并运行 Mac 健康检查。该流程仍然**没有在真实 Typora on macOS 中验证**。
+安装后重新打开 Typora。`--with-community` 会复用正常的社区加载器；首次安装会下载固定版本的社区官方包并核对 SHA-256。首次安装或 Typora 更新后，[社区官方脚本](https://github.com/typora-community-plugin/typora-community-plugin/blob/2.10.86/packages/installer/README.zh-CN.md#macos)会修改应用内的 HTML。若 macOS 阻止写入，请在「系统设置 → 隐私与安全性 → App 管理」中允许当前终端修改应用，再重跑命令。安装器会备份原 HTML、启用翻译插件并保留已有设置，不会重新签名应用。Intel 使用同一份 JavaScript 包，但还未实测。
 
 ### 从源码安装
 
-先安装 `typora-community-plugin`，完全退出 Typora，然后按平台执行。
+安装前完全退出 Typora。Windows 还需要先安装 `typora-community-plugin`。
 
 Windows：
 
@@ -93,13 +96,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-plugin.ps1
 %USERPROFILE%\.typora\community-plugins\plugins\eleef.typora-side-by-side-translator
 ```
 
-macOS 候选：
+macOS（Node.js 24 或更高版本）：
 
 ```bash
-npm ci
-npm run ci
-./scripts/doctor-macos.sh --mode Community
-./scripts/install-plugin-macos.sh
+npm run install:macos
 ```
 
 macOS 默认插件目录为：
@@ -113,9 +113,9 @@ macOS 默认插件目录为：
 1. 在 Typora 中打开已保存的本地 `.md` 文件。
 2. 打开社区插件设置，分别选择界面语言和目标语言，再填写 `baseUrl`、`apiKey`、`model` 和 `timeoutMs`。
 3. API key 默认“本地保存（明文）”，关闭、重启或更新后仍可恢复；同一系统用户下的其他程序可以读取。若本机静态保密高于便利性，可选择“不保存（仅当前 Typora 会话）”。
-4. 打开社区命令面板；在已验证环境中快捷键是 `F2`。
-5. 搜索 **Side-by-Side Translator**，执行 **Toggle Pane**。
-6. 执行 **Translate Current File**，生成当前目标语言的缓存译文。
+4. 打开社区命令面板。实测 Mac 上社区核心 2.10.86 默认用 `F1`（或 `Fn+F1`），实测 Windows 环境用 `F2`；若有改动，以社区快捷键设置为准。
+5. 搜索 **显示或隐藏译文面板**（`Toggle Pane`），打开右栏。
+6. 执行 **翻译当前文件**（`Translate Current File`）或点右栏的 **全文翻译**，生成当前目标语言的译文。
 7. 修改原文后，需要更新时执行 **Refresh Stale Blocks**。
 8. 请求运行期间可执行 **Cancel Translation**，停止任务且不覆盖现有缓存。
 9. 执行 **Export Target File**，在原文旁生成带语言后缀的干净 Markdown。
@@ -147,7 +147,7 @@ macOS 默认插件目录为：
 - 本地插件设置是默认值，会在当前用户的社区插件数据中明文保存 API key；同一系统用户下运行的其他程序可以读取。可选的会话模式只在内存中保留 key，关闭、重启或更新 Typora 后无法恢复。
 - 更换 API 服务来源会清除内存和已保存的 key；切回会话模式或点击显式删除也会移除已保存值。
 - 覆盖安装或卸载插件代码都不会删除社区插件设置、缓存和日志。升级安装器会验证持久设置文件安装前后完全一致；但只存在内存中的会话 key 会随 Typora 关闭而消失。如需清除本地数据，应在卸载前通过插件设置执行 **清除全部插件本地数据**。
-- 翻译缓存位于社区插件设置数据目录下：Windows 已验证布局为 `%USERPROFILE%\.typora\community-plugins\settings\data\...`，macOS 候选布局为 `~/Library/Application Support/abnerworks.Typora/plugins/settings/data/...`。
+- 翻译缓存位于社区插件设置数据目录下：Windows 为 `%USERPROFILE%\.typora\community-plugins\settings\data\...`，macOS 为 `~/Library/Application Support/abnerworks.Typora/plugins/settings/data/...`。
 - **清理当前文档** 只删除当前目标语言的缓存译文和映射。设置页还可以清理全部翻译缓存、诊断日志或全部插件本地数据；已导出的 Markdown 不会被删除。
 - 诊断日志会隐藏凭据、本机路径、网址查询参数和敏感错误详情。
 - 右侧只读窗格会转义 Markdown 原始 HTML，并用严格白名单净化渲染结果；可执行标记和外部资源元素会被移除。
@@ -161,7 +161,7 @@ macOS 默认插件目录为：
 - 只支持已保存的本地 `.md` 文件，不支持未命名文档和远程文件。
 - 当前不提供原文语言手动指定或自动选择目标语言，原文识别交给配置的模型。
 - 右侧窗格只读，不会逐键自动翻译。
-- Windows 是当前正式支持的 Alpha 平台；macOS 为代码和安装候选，真实 Typora UI 与运行行为尚未验证。
+- macOS 目前仅在一套 Apple Silicon 环境验证安装与双语使用，未覆盖 Windows 验收矩阵中的所有场景。
 - Alpha 已支持从 GitHub Release 安装；社区市场安装将在正式 `0.1.0` 发布后推进。
 
 ## 故障排查
@@ -175,10 +175,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 macOS：
 
 ```bash
-./scripts/doctor-macos.sh --redact-paths
+bash ./scripts/doctor-macos.sh --redact-paths
 ```
 
-Typora 更新可能替换 `typora-community-plugin` 修改过的应用 HTML，导致插件市场和全部社区插件消失。如果健康检查显示 `community-market.injection` 失败，请完全关闭 Typora，并针对更新后的 Typora 重新安装当前官方社区加载器。不要用旧版 Typora HTML 覆盖新版文件。
+Typora 更新可能替换被修改过的应用 HTML，导致社区插件全部消失。若健康检查报告 `community-market.injection` 失败，完全退出 Typora 后重跑一键安装命令，它会把现有加载器重新接入。不要用旧版本的 HTML 覆盖更新后的 Typora。
 
 提交问题时，请先使用 `-RedactPaths` 重新运行健康检查，再通过仓库中的 Bug 或 Compatibility 表单附上这份脱敏摘要、Typora 版本、社区核心版本和复现步骤。不要提交 API key 或未处理的原始日志。
 

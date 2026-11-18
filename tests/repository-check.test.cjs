@@ -101,7 +101,6 @@ test("macOS installer and doctor follow the community runtime directory contract
   assert.doesNotMatch(`${installer}\n${doctor}`, /plutil\s+-lint/);
   assert.match(installer, /settings_hash_before/);
   assert.match(installer, /validate_zip_entries/);
-  assert.match(doctor, /plugin\.verified-matrix/);
 });
 
 test("persistent API key storage is the explicit plaintext default", () => {

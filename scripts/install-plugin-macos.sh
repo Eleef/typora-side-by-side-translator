@@ -6,6 +6,9 @@ typora_home=""
 community_root=""
 package_path=""
 expected_sha256=""
+with_community=false
+community_version="2.10.86"
+community_sha256="43993658f6558d3606c75767778d64138d703f7ef6e83689bbe56b3599105757"
 accept_session_credential_loss=false
 plugin_id="eleef.typora-side-by-side-translator"
 legacy_plugin_ids=("eleef.typora-side-by-side-translation" "typora-bilingual" "jiang.typora-bilingual")
@@ -15,6 +18,7 @@ doctor="$script_dir/doctor-macos.sh"
 source_path="$workspace/build/typora-side-by-side-translator"
 source_kind="build"
 temporary_source_root=""
+staging=""
 target_backup=""
 state_backup=""
 install_complete=false
@@ -39,6 +43,10 @@ while [[ $# -gt 0 ]]; do
     --expected-sha256)
       expected_sha256="${2:-}"
       shift 2
+      ;;
+    --with-community)
+      with_community=true
+      shift
       ;;
     --accept-session-credential-loss)
       accept_session_credential_loss=true
@@ -76,22 +84,9 @@ if [[ -z "$typora_home" || ! -d "$typora_home" ]]; then
   exit 1
 fi
 
-if [[ -z "$community_root" ]]; then
-  community_root="$HOME/Library/Application Support/abnerworks.Typora/plugins"
-fi
-if [[ ! -d "$community_root" ]]; then
-  printf 'typora-community-plugin is not installed at: %s\n' "$community_root" >&2
-  exit 1
-fi
-community_root="$(cd "$community_root" && pwd -P)"
-plugins_root="$community_root/plugins"
-/bin/mkdir -p "$plugins_root"
-plugins_root="$(cd "$plugins_root" && pwd -P)"
-target="$plugins_root/$plugin_id"
-staging="$plugins_root/$plugin_id.installing"
-target_backup="$plugins_root/$plugin_id.previous"
-plugin_settings_path="$community_root/settings/data/$plugin_id.json"
-plugin_states_path="$community_root/settings/plugins.json"
+typora_home="$(cd "$typora_home" && pwd -P)"
+default_community_root="$HOME/Library/Application Support/abnerworks.Typora/plugins"
+community_root="${community_root:-$default_community_root}"
 
 cleanup() {
   local exit_code=$?
@@ -109,7 +104,9 @@ cleanup() {
   else
     /bin/rm -rf "$target_backup"
   fi
-  /bin/rm -rf "$staging"
+  if [[ -n "$staging" ]]; then
+    /bin/rm -rf "$staging"
+  fi
   if [[ -n "$temporary_source_root" && -d "$temporary_source_root" ]]; then
     case "$temporary_source_root" in
       /tmp/*|/private/tmp/*|"${TMPDIR:-/tmp}"*) /bin/rm -rf "$temporary_source_root" ;;
@@ -124,6 +121,61 @@ trap cleanup EXIT
 sha256_file() {
   /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print tolower($1)}'
 }
+
+install_community() (
+  if [[ "$community_root" != "$default_community_root" ]]; then
+    printf 'The official macOS installer only supports the default community directory.\n' >&2
+    exit 1
+  fi
+  local window_html="" candidate
+  for candidate in \
+    "$typora_home/Contents/Resources/TypeMark/index.html" \
+    "$typora_home/Contents/Resources/app/index.html" \
+    "$typora_home/Contents/Resources/appsrc/index.html"; do
+    if [[ -f "$candidate" ]]; then
+      window_html="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$window_html" ]] || ! /usr/bin/grep -Fq '</body>' "$window_html"; then
+    printf 'No supported Typora HTML entry point was found in %s.\n' "$typora_home" >&2
+    exit 1
+  fi
+  local work archive upstream backup_dir backup=""
+  work="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/typora-community-bootstrap.XXXXXX")"
+  trap '/bin/rm -rf "$work"' EXIT
+  archive="$work/community.zip"
+  upstream="$work/upstream"
+  /usr/bin/curl --fail --location --silent --show-error --retry 2 --max-time 60 --output "$archive" \
+    "https://github.com/typora-community-plugin/typora-community-plugin/releases/download/$community_version/typora-community-plugin.zip"
+  if [[ "$(sha256_file "$archive")" != "$community_sha256" ]]; then
+    printf 'Community release checksum mismatch; installation stopped.\n' >&2
+    exit 1
+  fi
+
+  if [[ -e "$community_root/loader.js" || -e "$community_root/loader.json" ]]; then
+    /bin/mkdir "$upstream"
+    /usr/bin/unzip -p "$archive" install-macos.sh > "$upstream/install-macos.sh"
+  else
+    /usr/bin/ditto -x -k "$archive" "$upstream"
+  fi
+
+  backup_dir="${default_community_root%/plugins}/community-loader-backups"
+  /bin/mkdir -p "$backup_dir"
+  backup_dir="$(/usr/bin/mktemp -d "$backup_dir/install.XXXXXX")"
+  backup="$backup_dir/index.html"
+  /usr/bin/ditto "$window_html" "$backup"
+  if ! /bin/bash "$upstream/install-macos.sh" --path "$typora_home" ||
+     ! /bin/bash "$doctor" --mode Community --path "$typora_home" --community-root "$community_root"; then
+    if ! /usr/bin/cmp -s "$window_html" "$backup"; then
+      /usr/bin/ditto "$backup" "$window_html" ||
+        printf 'Could not restore Typora HTML; original is at %s\n' "$backup" >&2
+    fi
+    printf 'Community setup failed. Check App Management permission for the terminal. If the existing community files are incomplete, repair them with the official community installer.\n' >&2
+    exit 1
+  fi
+  printf 'community_html_backup=%s\n' "$backup"
+)
 
 read_json_raw() {
   JSON_PATH="$1" JSON_KEY="$2" /usr/bin/osascript -l JavaScript 2>/dev/null <<'JXA'
@@ -278,7 +330,24 @@ if ! /usr/bin/grep -Eq '"darwin"' "$source_manifest"; then
   exit 1
 fi
 
-/bin/bash "$doctor" --mode Community --path "$typora_home" --community-root "$community_root"
+community_check=(--mode Community --path "$typora_home" --community-root "$community_root")
+if [[ "$with_community" == true ]]; then
+  if ! /bin/bash "$doctor" "${community_check[@]}" >/dev/null; then
+    install_community
+  fi
+else
+  /bin/bash "$doctor" "${community_check[@]}"
+fi
+
+community_root="$(cd "$community_root" && pwd -P)"
+plugins_root="$community_root/plugins"
+/bin/mkdir -p "$plugins_root"
+plugins_root="$(cd "$plugins_root" && pwd -P)"
+target="$plugins_root/$plugin_id"
+staging="$plugins_root/$plugin_id.installing"
+target_backup="$plugins_root/$plugin_id.previous"
+plugin_settings_path="$community_root/settings/data/$plugin_id.json"
+plugin_states_path="$community_root/settings/plugins.json"
 
 settings_hash_before=""
 if [[ -f "$plugin_settings_path" ]]; then
